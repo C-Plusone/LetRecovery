@@ -1,0 +1,60 @@
+name: Update package.7z
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Download URL for package.7z"
+        required: true
+        default: "https://yp.sysre.cn/api/dl/xMl1O1yopDRYq1Ed"
+      target_repo:
+        description: "Repo holding the release"
+        required: true
+        default: "NORMAL-EX/letrecovery-package"
+      tag:
+        description: "Release tag to update"
+        required: true
+        default: "release"
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package.7z
+        run: |
+          set -euo pipefail
+          echo "Downloading from: ${{ inputs.url }}"
+          curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 -o package.7z "${{ inputs.url }}"
+          SIZE=$(stat -c%s package.7z)
+          echo "Downloaded size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "::error::File too small ($SIZE bytes) - likely an error/HTML page, aborting"
+            head -c 300 package.7z || true
+            exit 1
+          fi
+          MAGIC=$(xxd -p -l 6 package.7z)
+          echo "Magic bytes: $MAGIC (expect 377abcaf271c for 7z)"
+          if [ "$MAGIC" != "377abcaf271c" ]; then
+            echo "::error::Not a valid 7z file (magic=$MAGIC), aborting"
+            exit 1
+          fi
+          echo "OK: valid 7z, $SIZE bytes"
+
+      - name: Upload to release (replace package.7z)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::RELEASE_PAT secret is empty/missing"
+            exit 1
+          fi
+          REPO="${{ inputs.target_repo }}"
+          TAG="${{ inputs.tag }}"
+          echo "Uploading package.7z to $REPO @ tag '$TAG' (clobber existing asset)"
+          gh release upload "$TAG" package.7z --repo "$REPO" --clobber
+          echo "--- assets now on $REPO @ $TAG ---"
+          gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[] | "\(.name)  \(.size) bytes"'
