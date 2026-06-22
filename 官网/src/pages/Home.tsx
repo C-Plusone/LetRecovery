@@ -10,7 +10,6 @@ import {
   Gauge,
   BadgeCheck,
   Info,
-  ExternalLink,
   Cloud,
   HardDrive,
   Github
@@ -205,19 +204,6 @@ const Home: React.FC = () => {
                       </div>
                     </DialogPanel>
                     <DialogFooter>
-                      <Button
-                        variant="outline"
-                        render={
-                          <a
-                            href="https://github.com/NORMAL-EX/LetRecovery/releases"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          />
-                        }
-                      >
-                        <ExternalLink className="mr-2 size-4" />
-                        GitHub Releases
-                      </Button>
                       <DialogClose render={<Button variant="outline" />}>
                         关闭
                       </DialogClose>
