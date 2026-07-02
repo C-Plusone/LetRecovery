@@ -5,9 +5,7 @@ description: An introduction to LetRecovery — a free and open-source tool for 
 
 # What is LetRecovery?
 
-**LetRecovery** is a free, open-source tool for **reinstalling and backing up Windows**. It can deploy system
-images (WIM / ESD / SWM / GHO / ISO, including text-mode setup for Windows XP / 2003), back up your existing system,
-download images online, and ships with a full set of common maintenance tools — all in one clean, ad-free interface.
+**LetRecovery** is a free, open-source tool for **reinstalling and backing up Windows**. It can deploy system images (WIM / ESD / SWM / GHO / ISO, including text-mode setup for Windows XP / 2003), back up your existing system, download images online, and ships with a full set of common maintenance tools — all in one clean, ad-free interface.
 
 It is built on **Rust + egui** and runs both under the normal Windows desktop and directly inside **WinPE**.
 Its goal is to let even non-technical users reinstall Windows safely.
@@ -18,16 +16,13 @@ LetRecovery is free forever. Please obtain it only from [official channels](#whe
 
 ## Highlights
 
-- **Multi-format installation** — WIM / ESD / SWM / GHO / ISO, automatic ISO mounting, and your pick of any edition inside the image;
-  it also supports original [i386 text-mode setup for Windows XP / 2003](/guide/xp-install).
-- **Dual desktop & WinPE clients** — when reinstalling the *current* system drive from the desktop, it automatically writes the boot entry and reboots into WinPE;
-  run it directly inside WinPE and it installs in place.
+- **Multi-format installation** — WIM / ESD / SWM / GHO / ISO, automatic ISO mounting, and your pick of any edition inside the image; it also supports original [i386 text-mode setup for Windows XP / 2003](/guide/xp-install).
+- **Dual desktop & WinPE clients** — when reinstalling the *current* system drive from the desktop, it automatically writes the boot entry and reboots into WinPE; run it directly inside WinPE and it installs in place.
 - **Reinstall onto BitLocker-encrypted drives** — automatically unlocks or decrypts the BitLocker volume before deployment.
 - **Full / incremental backup** to WIM / ESD / SWM / GHO.
 - **Online download** of images, common software, and graphics drivers, with Aria2 multi-threaded acceleration.
 - **Easy Mode** — [one-click reinstall](/guide/easy-mode): just pick the system, pick the edition, and confirm.
-- **Complete Toolbox** — BitLocker management, password reset, image/hash verification, one-click partitioning, driver backup and restore,
-  [Lossless C: Expansion](/guide/expand-c-drive), boot repair, and more.
+- **Complete Toolbox** — BitLocker management, password reset, image/hash verification, one-click partitioning, driver backup and restore, [Lossless C: Expansion](/guide/expand-c-drive), boot repair, and more.
 
 ## How it works
 
@@ -38,9 +33,7 @@ LetRecovery has two frontends that share the same core (`lr-core`):
 | **Desktop client** | `LetRecovery.exe` | The main interface. Runs both under normal Windows **and** in WinPE (PE is auto-detected). |
 | **PE client** | `LetRecoveryPE.exe` | A streamlined, unattended install/backup interface used by the "auto-reboot into WinPE" flow. |
 
-When installing to a **non-system** partition (or when you are already in WinPE), it deploys **directly**; when installing from the desktop to the **running
-system drive**, LetRecovery first prepares the WinPE boot entry, reboots into it, and finishes inside PE — because a running
-system cannot overwrite itself.
+When installing to a **non-system** partition (or when you are already in WinPE), it deploys **directly**; when installing from the desktop to the **running system drive**, LetRecovery first prepares the WinPE boot entry, reboots into it, and finishes inside PE — because a running system cannot overwrite itself.
 
 ::: details How is PE detected?
 On startup, the desktop client weighs several signals to decide whether it is currently running inside WinPE: whether the system drive is `X:`, whether
@@ -51,26 +44,22 @@ automatically enables or disables the relevant features (for example, "One-click
 ## Which systems can I install?
 
 - **Running the LetRecovery desktop client** requires **Windows 10 / 11 (64-bit)**, or simply run it inside WinPE.
-- **The installable target systems** cover a very wide range: Windows **XP / 2003 / 7 / 8 / 8.1 / 10 / 11**.
-  Systems from different eras automatically enable the matching compatibility handling (such as USB3/NVMe injection and blue-screen fixes for Win7, and
-  text-mode setup with storage-driver integration for XP).
+- **The installable target systems** cover a very wide range: Windows **XP / 2003 / 7 / 8 / 8.1 / 10 / 11**. Systems from different eras automatically enable the matching compatibility handling (such as USB3/NVMe injection and blue-screen fixes for Win7, and text-mode setup with storage-driver integration for XP).
 
 ## Where to get it
 
 - **GitHub Releases** — <https://github.com/NORMAL-EX/LetRecovery/releases>
 - **Official website** (three domains, same content) — <https://sysre.cn> / <https://letrecovery.net> / <https://letrecovery.cn>
-- **Official documentation** (this site) — <https://docs.letrecovery.net>
 
 The GitHub release is the **full package** (WinPE already bundled). See [Getting Started](/guide/getting-started) for details.
 
 ::: warning Verify the official domains
 This project has three official homepages with identical content — **sysre.cn**, **letrecovery.net**, and **letrecovery.cn**;
-its documentation is at **docs.letrecovery.net**, and its source code is at **github.com/NORMAL-EX/LetRecovery**.
+its source code is at **github.com/NORMAL-EX/LetRecovery**.
 Be cautious about any other "official site" or "download mirror."
 :::
 
 ## License
 
-LetRecovery is released under the
-[PolyForm Noncommercial License 1.0.0](https://github.com/NORMAL-EX/LetRecovery/blob/main/LICENSE):
+LetRecovery is released under the [PolyForm Noncommercial License 1.0.0](https://github.com/NORMAL-EX/LetRecovery/blob/main/LICENSE):
 personal, research, and non-commercial use is permitted; **commercial use is prohibited**.

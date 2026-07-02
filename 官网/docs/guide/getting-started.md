@@ -14,21 +14,17 @@ description: 下载、运行 LetRecovery 并完成第一次重装。
 - UEFI 或 Legacy BIOS 均可
 
 ::: tip 关于内存
-官方建议至少有 **4 GB 可用内存**，但这只是经验值——程序**不会**强制检测内存，内存偏小时
-释放大镜像可能更慢或失败而已。
+官方建议至少有 **4 GB 可用内存**，但这只是经验值——程序**不会**强制检测内存，内存偏小时释放大镜像可能更慢或失败而已。
 :::
 
-可安装的**目标系统**范围远不止 10/11，详见
-[可以装哪些系统](/guide/what-is-letrecovery#可以装哪些系统)。
+可安装的**目标系统**范围远不止 10/11，详见[可以装哪些系统](/guide/what-is-letrecovery#可以装哪些系统)。
 
 ## 1. 下载
 
-从 [GitHub Releases](https://github.com/NORMAL-EX/LetRecovery/releases) 获取最新
-**完整包**——就是一个内置了 WinPE 的 `LetRecovery.7z`。
+从 [GitHub Releases](https://github.com/NORMAL-EX/LetRecovery/releases) 获取最新**完整包**——就是一个内置了 WinPE 的 `LetRecovery.7z`。
 
 ::: warning 请用完整包
-请解压**整个** `LetRecovery.7z`，不要只把 `LetRecovery.exe` 单独拷出来——它需要随附的
-`bin\`、`opengl32.dll`、`libwim-15.dll` 等运行时 DLL 才能工作（尤其在 WinPE 里）。
+请解压**整个** `LetRecovery.7z`，不要只把 `LetRecovery.exe` 单独拷出来——它需要随附的 `bin\`、`opengl32.dll`、`libwim-15.dll` 等运行时 DLL 才能工作（尤其在 WinPE 里）。
 :::
 
 ## 2. 以管理员身份运行
@@ -70,8 +66,7 @@ description: 下载、运行 LetRecovery 并完成第一次重装。
 
 ## 怎么看版本号？
 
-软件版本号按**构建日期**生成，形如 `v2026.06.07`，可在**关于**页或日志开头的"版本"那行看到。
-反馈问题时带上它能帮助定位。
+软件版本号按**构建日期**生成，形如 `v2026.06.07`，可在**关于**页或日志开头的"版本"那行看到。反馈问题时带上它能帮助定位。
 
 ## 下一步
 

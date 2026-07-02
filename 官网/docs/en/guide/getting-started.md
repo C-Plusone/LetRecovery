@@ -17,8 +17,7 @@ To run the LetRecovery **desktop client**:
 The official recommendation is at least **4 GB of free memory**, but this is just a rule of thumb — the program does **not** enforce a memory check. With limited memory, applying a large image may simply be slower or fail.
 :::
 
-The range of **target systems** you can install goes well beyond 10/11. See
-[Which systems can it install](/guide/what-is-letrecovery) for details.
+The range of **target systems** you can install goes well beyond 10/11. See [Which systems can it install](/guide/what-is-letrecovery) for details.
 
 ## 1. Download
 

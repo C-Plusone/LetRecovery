@@ -5,8 +5,7 @@ description: One-click reinstall for beginners — pick a system, pick an editio
 
 # Easy Mode (One-Click Reinstall)
 
-If you don't want to deal with partitions, drivers, or unattended setup, **Easy Mode** (beginner mode) boils the entire reinstall down to
-three steps: **pick a system → pick an edition → confirm**, with common optimizations applied automatically.
+If you don't want to deal with partitions, drivers, or unattended setup, **Easy Mode** (beginner mode) boils the entire reinstall down to three steps: **pick a system → pick an edition → confirm**, with common optimizations applied automatically.
 
 ## How to Enable
 
@@ -44,5 +43,4 @@ flow: it first prepares the WinPE boot environment and reboots into it, then for
 
 ## Want Finer Control?
 
-When you need custom partitions, want to keep specific drivers, supply your own `unattend.xml`, or do more registry tweaks, turn off
-Easy Mode and switch to the standard [System Installation](/guide/system-install) + [Advanced Options](/guide/advanced-options).
+When you need custom partitions, want to keep specific drivers, supply your own `unattend.xml`, or do more registry tweaks, turn off Easy Mode and switch to the standard [System Installation](/guide/system-install) + [Advanced Options](/guide/advanced-options).

@@ -9,17 +9,14 @@ Open **Advanced Options** on the System Installation page to fine-tune the deplo
 
 ## Drivers
 
-- **Export / import drivers**—keep third-party drivers around after the reinstall. Export uses the official **DISM API**
-  (`DismExportDriver`), falling back to a manual DriverStore export on failure.
-- **Disk controller driver injection**—inject NVMe / RAID / AHCI drivers so the new system can boot on modern storage
-  (automatically checked for Win10/11 x64 images).
+- **Export / import drivers**—keep third-party drivers around after the reinstall. Export uses the official **DISM API** (`DismExportDriver`), falling back to a manual DriverStore export on failure.
+- **Disk controller driver injection**—inject NVMe / RAID / AHCI drivers so the new system can boot on modern storage (automatically checked for Win10/11 x64 images).
 
 ## Unattended
 
 - Use the built-in generated `unattend.xml`, or pick your **own** unattended file.
 - Customize the auto-created username and the system drive's volume label.
-- The program also **auto-detects** the target partition, the installation media root, and whether the image already ships its own answer file,
-  and checks unattended on by default accordingly.
+- The program also **auto-detects** the target partition, the installation media root, and whether the image already ships its own answer file, and checks unattended on by default accordingly.
 
 ::: tip Scope of a custom answer file
 A custom `unattend.xml` is fully copied into the target system and takes effect during the **install via PE** flow (this is also the main path for reinstalling the system drive from the desktop). A custom `winnt.sif` for XP/2003 likewise takes effect during its text-mode setup flow.

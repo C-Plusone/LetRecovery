@@ -17,10 +17,8 @@ description: 加入 LetRecovery 社区，获取帮助。
 
 ## 其他渠道
 
-- **GitHub Issues**——反馈 Bug / 提需求：
-  <https://github.com/NORMAL-EX/LetRecovery/issues>
+- **GitHub Issues**——反馈 Bug / 提需求：<https://github.com/NORMAL-EX/LetRecovery/issues>
 - **官方网站**（三个域名，内容相同）——<https://sysre.cn> / <https://letrecovery.net> / <https://letrecovery.cn>
-- **官方文档**——<https://docs.letrecovery.net>
 - **源代码**——<https://github.com/NORMAL-EX/LetRecovery>
 
 ## 如何反馈 Bug
@@ -29,8 +27,7 @@ description: 加入 LetRecovery 社区，获取帮助。
 
 1. 软件版本（构建日期版本号，如 `v2026.06.07` + 日志里"版本"那行 + 从哪下载的）。
 2. 出问题的阶段（桌面 / WinPE / 首次进系统后）。
-3. 运行环境（源系统与目标系统、UEFI/Legacy、Secure Boot、BitLocker、磁盘结构、
-   所用 PE、实体机 / 虚拟机）。
+3. 运行环境（源系统与目标系统、UEFI/Legacy、Secure Boot、BitLocker、磁盘结构、所用 PE、实体机 / 虚拟机）。
 4. 日志（桌面 `log\LetRecovery.<日期>.log` 和/或 PE 的 `LetRecoveryPE.log`）与截图。
 
 ::: tip 隐私

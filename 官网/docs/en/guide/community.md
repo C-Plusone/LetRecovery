@@ -17,10 +17,8 @@ The main place to chat, ask for help, and share tips.
 
 ## Other Channels
 
-- **GitHub Issues** — report bugs / request features:
-  <https://github.com/NORMAL-EX/LetRecovery/issues>
+- **GitHub Issues** — report bugs / request features: <https://github.com/NORMAL-EX/LetRecovery/issues>
 - **Official website** (three domains, same content) — <https://sysre.cn> / <https://letrecovery.net> / <https://letrecovery.cn>
-- **Official documentation** — <https://docs.letrecovery.net>
 - **Source code** — <https://github.com/NORMAL-EX/LetRecovery>
 
 ## How to Report a Bug

@@ -35,8 +35,7 @@ The "Start Backup" button only becomes available once the source partition, save
 "Incremental backup (append to an existing image)" is a checkbox option that behaves as follows:
 
 - When you use **Browse…** to select an **existing** image file, this option is **ticked automatically**; you can also tick it manually.
-- In incremental mode, LetRecovery **appends a new image index (INDEX)** to the existing image file,
-  rather than rewriting the whole file or adding a new "split".
+- In incremental mode, LetRecovery **appends a new image index (INDEX)** to the existing image file, rather than rewriting the whole file or adding a new "split".
 - Appending is only valid for **WIM / ESD**; SWM and GHO are always captured fresh each time.
 
 ::: tip Incremental ≠ split
@@ -47,8 +46,7 @@ Don't confuse the two.
 ## Backing Up the Running System
 
 The **current system partition** can't be reliably backed up in place while it's in use, so LetRecovery does it **via WinPE**:
-it first prepares the PE boot, writes this backup's name/format/incremental and other options into a config file, and after rebooting into WinPE,
-the PE client reads that config and then captures the image. Backing up a **non-system** partition (or running inside PE) proceeds directly.
+it first prepares the PE boot, writes this backup's name/format/incremental and other options into a config file, and after rebooting into WinPE, the PE client reads that config and then captures the image. Backing up a **non-system** partition (or running inside PE) proceeds directly.
 
 ::: tip Automatic verification
 Before capturing/deploying, the PE client verifies image integrity, so a corrupted image fails early and you avoid redoing the whole job.

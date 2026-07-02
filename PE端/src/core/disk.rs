@@ -329,14 +329,31 @@ impl DiskManager {
             _ => "本地磁盘",
         };
 
-        // 使用 cmd /c format 命令: format D: /FS:NTFS /V:Label /Q /Y
-        let cmd_args = format!("format {} /FS:NTFS /V:{} /Q /Y", drive, vol_label);
+        // 使用 diskpart 格式化，避免 format.com 在 PE 中的交互和参数兼容问题
+        let escaped_label = vol_label.replace('"', "'");
+        let script = format!(
+            "select volume {}\r\nformat fs=ntfs label=\"{}\" quick override\r\nexit\r\n",
+            drive_letter, escaped_label
+        );
+        let cmd_args = format!("diskpart format {}", drive);
         
-        log::info!("执行命令: cmd /c {}", cmd_args);
+        log::info!("执行命令: {}", cmd_args);
 
-        let output = new_command("cmd")
-            .args(["/c", &cmd_args])
+        let temp_dir = Self::reliable_temp_dir();
+        let script_path = temp_dir.join("lr_format_part.txt");
+        std::fs::write(&script_path, script.as_bytes())?;
+
+        let script_path_str = script_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("temporary diskpart script path is not UTF-8"))?;
+
+        let diskpart_path = get_diskpart_path();
+
+        let output = new_command(&diskpart_path)
+            .args(["/s", script_path_str])
             .output()?;
+
+        let _ = std::fs::remove_file(&script_path);
 
         let stdout = gbk_to_utf8(&output.stdout);
         let stderr = gbk_to_utf8(&output.stderr);
@@ -352,8 +369,11 @@ impl DiskManager {
         let has_success_indicator = success_indicators
             .iter()
             .any(|s| stdout_lower.contains(&s.to_lowercase()));
+        let has_success_indicator = has_success_indicator
+            || stdout.contains("\u{6210}\u{529f}\u{683c}\u{5f0f}\u{5316}")
+            || stdout_lower.contains("successfully formatted");
         
-        if output.status.success() || has_success_indicator {
+        if has_success_indicator {
             log::info!("分区 {} 格式化成功", drive);
             Ok(stdout)
         } else {

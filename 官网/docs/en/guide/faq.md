@@ -7,9 +7,7 @@ description: Frequently asked questions about LetRecovery.
 
 ## Does LetRecovery cost money?
 
-No—it's free forever and open source. Please only get it from
-[GitHub Releases](https://github.com/NORMAL-EX/LetRecovery/releases) or
-the [official website sysre.cn](https://sysre.cn). Anyone charging you is a third-party reseller with no connection to this project.
+No—it's free forever and open source. Please only get it from [GitHub Releases](https://github.com/NORMAL-EX/LetRecovery/releases) or the [official website sysre.cn](https://sysre.cn). Anyone charging you is a third-party reseller with no connection to this project.
 
 ## Which is the real official website?
 
@@ -33,8 +31,7 @@ Running the desktop client requires Windows 10/11 (64-bit) plus administrator pr
 
 ## Is BitLocker supported?
 
-Yes—before reinstalling, it automatically unlocks (key pass-through) or decrypts an encrypted system drive. See
-[Reinstalling on a BitLocker-Encrypted Drive](/guide/bitlocker).
+Yes—before reinstalling, it automatically unlocks (key pass-through) or decrypts an encrypted system drive. See [Reinstalling on a BitLocker-Encrypted Drive](/guide/bitlocker).
 
 ## Is there a simpler "one-click reinstall"?
 
