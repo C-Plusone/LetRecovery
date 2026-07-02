@@ -365,7 +365,14 @@ impl App {
             if options.format_partition {
                 log::info!("[INSTALL STEP 1] 开始格式化分区: {}", target_partition);
                 send_step(&progress_tx, 1, &tr!("格式化分区"), 30);
-                match format_partition(&target_partition) {
+                let volume_label = if advanced_options.custom_volume_label
+                    && !advanced_options.volume_label.is_empty()
+                {
+                    Some(advanced_options.volume_label.as_str())
+                } else {
+                    None
+                };
+                match format_partition(&target_partition, volume_label) {
                     Ok(_) => log::info!("[INSTALL STEP 1] 格式化完成"),
                     Err(e) => {
                         // 用户勾了「格式化分区」却失败：一律中止（不再仅 XP 才拦）。否则会把镜像/安装
@@ -1238,18 +1245,27 @@ fn ensure_mbr_disk_signature(disk: u32) -> Result<String, String> {
 }
 
 /// 格式化分区（用 diskpart，而不是 format.com）
-fn format_partition(partition: &str) -> anyhow::Result<()> {
+fn format_partition(partition: &str, volume_label: Option<&str>) -> anyhow::Result<()> {
     use crate::utils::cmd::create_command;
 
     let letter = partition.trim_end_matches('\\').trim_end_matches(':');
-    log::info!("[FORMAT] 用 diskpart 格式化分区: {} (volume {})", partition, letter);
+    log::info!(
+        "[FORMAT] 用 diskpart 格式化分区: {} (volume {}, label {:?})",
+        partition, letter, volume_label
+    );
 
     // 用 diskpart 格式化，而不是 format.com 管道喂提示：
     // format.com 在【卷已有卷标】时会先问「输入驱动器 X: 的当前卷标」做安全确认，喂 y 会被当成卷标 →
     // 报「卷标不正确」中止（实机 C:(卷标 DATA) 就栽在这）。diskpart 不问卷标，直接快速格式化为 NTFS；
     // override 在卷被占用（如 PE 资源管理器正浏览该盘）时强制卸载文件系统后再格式化，且不丢盘符。
-    let script =
-        format!("select volume {letter}\r\nformat fs=ntfs quick override\r\nexit\r\n");
+    let format_cmd = match volume_label {
+        Some(label) if !label.trim().is_empty() => {
+            let escaped_label = label.replace('"', "'");
+            format!("format fs=ntfs label=\"{}\" quick override", escaped_label)
+        }
+        _ => "format fs=ntfs quick override".to_string(),
+    };
+    let script = format!("select volume {letter}\r\n{format_cmd}\r\nexit\r\n");
     let tmp = std::env::temp_dir().join("lr_xp_format.txt");
     std::fs::write(&tmp, script.as_bytes())?;
     let tmp_str = tmp.to_string_lossy().into_owned();
