@@ -1017,6 +1017,7 @@
     "磁盘 {} 包含当前系统盘 {}:，无法进行一键分区": "Disk {} contains the current system drive {}:, so Quick Partition cannot be performed.",
     "磁盘分区详情": "Disk Partition Details",
     "禁用Windows安全中心": "Disable Windows Security Center",
+    "禁用Windows自动更新": "Disable Windows Automatic Updates",
     "禁用Windows更新": "Disable Windows Update",
     "禁用intelppm/amdppm服务，解决新平台ACPI兼容性问题": "Disable the intelppm/amdppm services to fix ACPI compatibility issues on new platforms.",
     "禁用用户账户控制(UAC)": "Disable User Account Control (UAC)",

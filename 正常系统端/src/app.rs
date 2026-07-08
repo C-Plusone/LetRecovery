@@ -1910,14 +1910,20 @@ impl eframe::App for App {
                 self.last_is_xp = Some(is_xp);
             }
 
+            let mut advanced_options_open = self.show_advanced_options;
             egui::Window::new(tr!("高级选项"))
-                .open(&mut self.show_advanced_options)
+                .open(&mut advanced_options_open)
                 .min_width(500.0)
                 .min_height(400.0)
                 .show(ctx, |ui| {
                     self.advanced_options
                         .show_ui(ui, self.hardware_info.as_ref(), unattend_disabled, is_win7, is_xp, is_uefi_mode);
                 });
+
+            if self.show_advanced_options && !advanced_options_open {
+                self.advanced_options.disable_empty_custom_text_options();
+            }
+            self.show_advanced_options = advanced_options_open;
         }
 
         // 如果有正在进行的任务，定期刷新

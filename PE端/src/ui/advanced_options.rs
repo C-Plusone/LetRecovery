@@ -124,25 +124,17 @@ pub fn apply_advanced_options(target_partition: &str, config: &InstallConfig) ->
         );
     }
 
-    // 4. 禁用Windows更新
+    // 4. 禁用Windows自动更新
     if config.disable_windows_update {
-        log::info!("[ADVANCED] 禁用Windows更新服务");
-        // 禁用 Windows Update 服务 (Start=4 表示禁用)
-        let _ = OfflineRegistry::set_dword(
-            "HKLM\\pc-sys\\ControlSet001\\Services\\wuauserv",
-            "Start",
-            4,
-        );
-        // 禁用 Update Orchestrator Service
-        let _ = OfflineRegistry::set_dword(
-            "HKLM\\pc-sys\\ControlSet001\\Services\\UsoSvc",
-            "Start",
-            4,
-        );
-        // 设置策略禁用自动更新
+        log::info!("[ADVANCED] 通过策略禁用Windows自动更新");
         let _ = OfflineRegistry::set_dword(
             "HKLM\\pc-soft\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
             "NoAutoUpdate",
+            1,
+        );
+        let _ = OfflineRegistry::set_dword(
+            "HKLM\\pc-soft\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+            "AUOptions",
             1,
         );
     }

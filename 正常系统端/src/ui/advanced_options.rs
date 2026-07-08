@@ -123,6 +123,18 @@ impl AdvancedOptions {
         }
     }
 
+    pub fn disable_empty_custom_text_options(&mut self) {
+        if self.custom_username && self.username.trim().is_empty() {
+            self.custom_username = false;
+            self.username.clear();
+        }
+
+        if self.custom_volume_label && self.volume_label.trim().is_empty() {
+            self.custom_volume_label = false;
+            self.volume_label.clear();
+        }
+    }
+
     /// 获取 UefiSeven 目录（bin\uefiseven）
     fn get_uefiseven_dir() -> Option<PathBuf> {
         Self::get_program_dir().map(|b| b.join("bin").join("uefiseven"))
@@ -523,7 +535,7 @@ log=0
             self.apply_bypass_nro();
         }
 
-        // 4. 禁用Windows更新
+        // 4. 禁用Windows自动更新
         if self.disable_windows_update {
             self.apply_disable_windows_update();
         }
@@ -696,25 +708,17 @@ log=0
         );
     }
 
-    /// 4. 禁用Windows更新
+    /// 4. 禁用Windows自动更新
     fn apply_disable_windows_update(&self) {
-        log::info!("[ADVANCED] 禁用Windows更新服务");
-        // 禁用 Windows Update 服务
-        let _ = OfflineRegistry::set_dword(
-            "HKLM\\pc-sys\\ControlSet001\\Services\\wuauserv",
-            "Start",
-            4, // 4 = Disabled
-        );
-        // 禁用 Update Orchestrator Service
-        let _ = OfflineRegistry::set_dword(
-            "HKLM\\pc-sys\\ControlSet001\\Services\\UsoSvc",
-            "Start",
-            4,
-        );
-        // 设置策略禁用自动更新
+        log::info!("[ADVANCED] 通过策略禁用Windows自动更新");
         let _ = OfflineRegistry::set_dword(
             "HKLM\\pc-soft\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
             "NoAutoUpdate",
+            1,
+        );
+        let _ = OfflineRegistry::set_dword(
+            "HKLM\\pc-soft\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+            "AUOptions",
             1,
         );
     }
@@ -1895,7 +1899,7 @@ Write-Host "UWP应用清理完成"
                 "此选项依赖无人值守配置，由于目标分区已存在配置文件而被禁用"
             );
             
-            ui.checkbox(&mut self.disable_windows_update, tr!("禁用Windows更新"));
+            ui.checkbox(&mut self.disable_windows_update, tr!("禁用Windows自动更新"));
             ui.checkbox(&mut self.disable_windows_defender, tr!("禁用Windows安全中心"));
             ui.checkbox(&mut self.disable_reserved_storage, tr!("禁用系统保留空间"));
             ui.checkbox(&mut self.disable_uac, tr!("禁用用户账户控制(UAC)"));

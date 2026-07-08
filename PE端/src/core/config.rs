@@ -67,7 +67,7 @@ pub struct InstallConfig {
     pub restore_classic_context_menu: bool,
     /// OOBE绕过强制联网
     pub bypass_nro: bool,
-    /// 禁用Windows更新
+    /// 禁用Windows自动更新
     pub disable_windows_update: bool,
     /// 禁用Windows安全中心
     pub disable_windows_defender: bool,
