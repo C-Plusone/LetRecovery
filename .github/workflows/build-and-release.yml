@@ -11,6 +11,36 @@ on:
         description: "Release 标签(留空=用当天日期,如 2026.6.17)"
         required: false
         default: ""
+      upload_onedrive_wim:
+        description: "测试用 rclone 上传生成后的 PE WIM 到世纪互联 OneDrive"
+        required: false
+        type: boolean
+        default: false
+      onedrive_remote_path:
+        description: "OneDrive target path under /CE-RAMOS"
+        required: false
+        default: ""
+      update_letrecovery_server:
+        description: "Update LetRecovery server pe.txt after WIM upload"
+        required: false
+        type: boolean
+        default: false
+      letrecovery_update_api:
+        description: "LetRecovery update.php URL"
+        required: false
+        default: "https://do.cloud-pe.cn"
+      letrecovery_pe_url:
+        description: "PE download URL written to LetRecovery pe.txt"
+        required: false
+        default: ""
+      letrecovery_pe_name:
+        description: "PE display name written to LetRecovery pe.txt"
+        required: false
+        default: "LetRecovery PE"
+      letrecovery_pe_filename:
+        description: "PE filename written to LetRecovery pe.txt"
+        required: false
+        default: "LetRecovery_PE.wim"
 
 permissions:
   contents: write
@@ -200,6 +230,229 @@ jobs:
           PY
           echo "--- updated config.json ---"
           cat pkg/config.json
+
+      - name: Upload PE WIM to 21Vianet OneDrive with rclone
+        if: ${{ inputs.upload_onedrive_wim == true }}
+        shell: pwsh
+        env:
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          ONEDRIVE_CLIENT_SECRET: ${{ secrets.ONEDRIVE_CLIENT_SECRET }}
+          ONEDRIVE_TENANT_ID: ${{ secrets.ONEDRIVE_TENANT_ID }}
+          ONEDRIVE_USER_EMAIL: ${{ secrets.ONEDRIVE_USER_EMAIL }}
+          ONEDRIVE_REMOTE_ROOT: ${{ secrets.ONEDRIVE_REMOTE_ROOT }}
+          ONEDRIVE_REMOTE_PATH: ${{ inputs.onedrive_remote_path || secrets.ONEDRIVE_REMOTE_PATH }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          foreach ($name in @("ONEDRIVE_CLIENT_ID", "ONEDRIVE_CLIENT_SECRET", "ONEDRIVE_TENANT_ID", "ONEDRIVE_USER_EMAIL")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing repository secret: $name"
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($env:ONEDRIVE_REMOTE_PATH)) {
+            throw "OneDrive remote path is empty"
+          }
+          if (-not $env:ONEDRIVE_REMOTE_PATH.StartsWith("/")) {
+            throw "OneDrive remote path must start with '/': $env:ONEDRIVE_REMOTE_PATH"
+          }
+
+          $wimPath = "pkg\bin\pe\LetRecovery_PE.wim"
+          if (-not (Test-Path -LiteralPath $wimPath)) {
+            throw "WIM not found: $wimPath"
+          }
+
+          $wim = Get-Item -LiteralPath $wimPath
+          $md5 = (Get-FileHash -LiteralPath $wim.FullName -Algorithm MD5).Hash.ToUpperInvariant()
+          $root = $env:ONEDRIVE_REMOTE_ROOT.Trim([char]'/')
+          $leaf = $env:ONEDRIVE_REMOTE_PATH.TrimStart([char]'/')
+          $targetPath = if ([string]::IsNullOrWhiteSpace($root)) { $leaf } else { "$root/$leaf" }
+
+          Write-Host "Uploading PE WIM to 21Vianet OneDrive: /$targetPath"
+          Write-Host "Local WIM: $($wim.FullName)"
+          Write-Host "Size: $($wim.Length) bytes"
+          Write-Host "MD5: $md5"
+
+          if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
+            choco install rclone -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Failed to install rclone" }
+          }
+          rclone version
+          if ($LASTEXITCODE -ne 0) { throw "rclone is not available" }
+
+          $tokenBody = @{
+            client_id = $env:ONEDRIVE_CLIENT_ID
+            client_secret = $env:ONEDRIVE_CLIENT_SECRET
+            scope = "https://microsoftgraph.chinacloudapi.cn/.default"
+            grant_type = "client_credentials"
+          }
+          $tokenResponse = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://login.chinacloudapi.cn/$($env:ONEDRIVE_TENANT_ID)/oauth2/v2.0/token" `
+            -ContentType "application/x-www-form-urlencoded" `
+            -Body $tokenBody `
+            -TimeoutSec 60
+
+          if ([string]::IsNullOrWhiteSpace($tokenResponse.access_token)) {
+            throw "Failed to obtain Microsoft Graph access token"
+          }
+
+          $graphHeaders = @{
+            Authorization = "Bearer $($tokenResponse.access_token)"
+          }
+          $encodedUser = [System.Uri]::EscapeDataString($env:ONEDRIVE_USER_EMAIL)
+          $drive = Invoke-RestMethod `
+            -Method Get `
+            -Uri "https://microsoftgraph.chinacloudapi.cn/v1.0/users/$encodedUser/drive" `
+            -Headers $graphHeaders `
+            -TimeoutSec 60
+
+          if ([string]::IsNullOrWhiteSpace($drive.id)) {
+            throw "Failed to resolve OneDrive drive id for $($env:ONEDRIVE_USER_EMAIL)"
+          }
+          Write-Host "Resolved OneDrive drive id for $($env:ONEDRIVE_USER_EMAIL)"
+
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_TYPE = "onedrive"
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_REGION = "cn"
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_CLIENT_ID = $env:ONEDRIVE_CLIENT_ID
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_CLIENT_SECRET = $env:ONEDRIVE_CLIENT_SECRET
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_TENANT = $env:ONEDRIVE_TENANT_ID
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_CLIENT_CREDENTIALS = "true"
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_DRIVE_ID = $drive.id
+          $env:RCLONE_CONFIG_LR_ONEDRIVE_DRIVE_TYPE = "business"
+
+          rclone copyto `
+            $wim.FullName `
+            "lr_onedrive:$targetPath" `
+            --onedrive-chunk-size 80Mi `
+            --onedrive-upload-cutoff 4Mi `
+            --onedrive-no-versions `
+            --transfers 1 `
+            --checkers 4 `
+            --retries 5 `
+            --low-level-retries 20 `
+            --stats 10s `
+            --progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "rclone upload failed for /$targetPath"
+          }
+
+          rclone lsl "lr_onedrive:$targetPath"
+          if ($LASTEXITCODE -ne 0) {
+            throw "rclone upload verification failed for /$targetPath"
+          }
+
+      - name: Update LetRecovery server PE config
+        if: ${{ inputs.upload_onedrive_wim == true && inputs.update_letrecovery_server == true }}
+        shell: pwsh
+        env:
+          UPDATE_API_SECRET: ${{ secrets.UPDATE_API_SECRET }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          LETRECOVERY_UPDATE_API: ${{ inputs.letrecovery_update_api }}
+          LETRECOVERY_PE_URL: ${{ inputs.letrecovery_pe_url || secrets.LETRECOVERY_PE_URL }}
+          LETRECOVERY_PE_NAME: ${{ inputs.letrecovery_pe_name }}
+          LETRECOVERY_PE_FILENAME: ${{ inputs.letrecovery_pe_filename }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          foreach ($name in @("UPDATE_API_SECRET", "LETRECOVERY_UPDATE_API", "LETRECOVERY_PE_URL", "LETRECOVERY_PE_NAME", "LETRECOVERY_PE_FILENAME")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing value: $name"
+            }
+          }
+
+          $wimPath = "pkg\bin\pe\LetRecovery_PE.wim"
+          if (-not (Test-Path -LiteralPath $wimPath)) {
+            throw "WIM not found: $wimPath"
+          }
+
+          $md5 = (Get-FileHash -LiteralPath $wimPath -Algorithm MD5).Hash.ToUpperInvariant()
+          $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
+          $rand = [guid]::NewGuid().ToString("N")
+          $version = "v0.0.0"
+          $log = "Update LetRecovery PE WIM"
+          $canSkip = "true"
+
+          function Convert-BytesToHexLower([byte[]] $bytes) {
+            return -join ($bytes | ForEach-Object { $_.ToString("x2") })
+          }
+
+          $payloadText = $env:LETRECOVERY_PE_URL + "`n" + $env:LETRECOVERY_PE_NAME + "`n" + $env:LETRECOVERY_PE_FILENAME + "`n" + $md5
+          $sha256 = [System.Security.Cryptography.SHA256]::Create()
+          try {
+            $payloadHash = Convert-BytesToHexLower ($sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($payloadText)))
+          } finally {
+            $sha256.Dispose()
+          }
+
+          $signPayload = $timestamp + $rand + $version + $md5 + $log + $canSkip + $payloadHash
+          $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($env:UPDATE_API_SECRET))
+          try {
+            $sign = Convert-BytesToHexLower ($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($signPayload)))
+          } finally {
+            $hmac.Dispose()
+          }
+
+          $body = [ordered]@{
+            timestamp = $timestamp
+            rand = $rand
+            version = $version
+            md5 = $md5
+            log = $log
+            can_skip = $canSkip
+            letrecovery = $true
+            payload_hash = $payloadHash
+            sign = $sign
+            lr_pe_url = $env:LETRECOVERY_PE_URL
+            lr_pe_name = $env:LETRECOVERY_PE_NAME
+            lr_pe_filename = $env:LETRECOVERY_PE_FILENAME
+            lr_pe_md5 = $md5
+          }
+
+          $json = $body | ConvertTo-Json -Compress
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          $bodyPath = Join-Path $env:RUNNER_TEMP "letrecovery-update-body.json"
+          [System.IO.File]::WriteAllBytes($bodyPath, $bytes)
+
+          $postScript = Join-Path $env:RUNNER_TEMP "letrecovery_post.py"
+          @'
+          import os
+          import ssl
+          import sys
+          import urllib.error
+          import urllib.request
+
+          url = os.environ["LETRECOVERY_UPDATE_API"]
+          body_path = os.environ["LETRECOVERY_UPDATE_BODY"]
+          headers = {"Content-Type": "application/json; charset=utf-8"}
+          deploy_token = os.environ.get("DEPLOY_TOKEN", "").strip()
+          if deploy_token:
+              headers["X-Deploy-Token"] = deploy_token
+
+          with open(body_path, "rb") as f:
+              body = f.read()
+
+          request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+          context = ssl._create_unverified_context()
+          try:
+              with urllib.request.urlopen(request, context=context, timeout=60) as response:
+                  sys.stdout.buffer.write(response.read())
+          except urllib.error.HTTPError as exc:
+              sys.stdout.buffer.write(exc.read())
+              sys.exit(1)
+          '@ | Set-Content -LiteralPath $postScript -Encoding UTF8
+
+          $env:LETRECOVERY_UPDATE_BODY = $bodyPath
+          $respRaw = & python $postScript
+          if ($LASTEXITCODE -ne 0) {
+            $respRaw
+            throw "LetRecovery update API request failed"
+          }
+
+          $resp = ($respRaw -join "`n") | ConvertFrom-Json
+          $resp | ConvertTo-Json -Depth 8
+          if ($resp.code -ne 200 -or $resp.letrecovery_written -ne $true) {
+            throw "LetRecovery update API rejected the request"
+          }
 
       - name: Force safe defaults in config.json (advanced options OFF)
         shell: bash
