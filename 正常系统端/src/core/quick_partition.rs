@@ -24,7 +24,6 @@ use windows::{
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS: u32 = 0x00560000;
 
 use crate::tr;
-use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 
@@ -937,34 +936,19 @@ pub fn execute_quick_partition(
 /// 执行 diskpart 脚本
 fn execute_diskpart_script(script: &str) -> Result<String> {
     let temp_dir = std::env::temp_dir();
-    let script_path = temp_dir.join("lr_quick_partition.txt");
 
     log::debug!("Diskpart 脚本内容:\n{}", script);
 
-    std::fs::write(&script_path, script)?;
-
-    let output = create_command(&get_diskpart_path())
-        .args([
-            "/s",
-            script_path
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-        ])
-        .output()?;
-
-    let _ = std::fs::remove_file(&script_path);
-
-    let output_text = gbk_to_utf8(&output.stdout);
-    let error_text = gbk_to_utf8(&output.stderr);
+    let output = lr_core::diskpart::execute_script(
+        &temp_dir,
+        "lr-quick-partition",
+        get_diskpart_path(),
+        script,
+    )?;
+    let output_text = lr_core::diskpart::validated_stdout(&output)
+        .map_err(|detail| anyhow::anyhow!("DiskPart 脚本执行失败: {detail}"))?;
 
     log::info!("Diskpart 输出: {}", output_text);
-    if !error_text.is_empty() {
-        log::warn!("Diskpart 错误: {}", error_text);
-    }
-
-    if !error_text.is_empty() && !output.status.success() {
-        anyhow::bail!("{}", error_text);
-    }
 
     Ok(output_text)
 }

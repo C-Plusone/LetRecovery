@@ -3,8 +3,9 @@ import { Card, CardFrame, CardPanel } from '@/components/ui/card'
 import DocsSidebar from '@/components/docs/DocsSidebar'
 import DocsOutline from '@/components/docs/DocsOutline'
 import DocContent from '@/components/docs/DocContent'
-import { getDocPage, getSidebar, firstDocLink } from '@/lib/docs'
-import { useLang, useT } from '@/lib/i18n'
+import { getDocPage } from '@/lib/docs'
+import { firstDocLink, getSidebar } from '@/lib/docs-navigation'
+import { useLang, useT } from '@/lib/i18n-hooks'
 
 const Docs: React.FC = () => {
   const { pathname } = useLocation()

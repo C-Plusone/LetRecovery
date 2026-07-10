@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::tr;
@@ -9,8 +8,8 @@ use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 use lr_core::boot_pca::BootPcaMode;
+use lr_core::command::CommandOutcome;
 
-static DISKPART_SCRIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static ESP_MOUNT_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct BootManager {
@@ -25,18 +24,17 @@ impl BootManager {
         crate::core::system_utils::get_temp_directory()
     }
 
-    fn run_diskpart_script(script: &str, purpose: &str) -> Result<std::process::Output> {
-        let sequence = DISKPART_SCRIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let script_path = Self::reliable_temp_dir().join(format!(
-            "lr_{purpose}_{}_{}.txt",
-            std::process::id(),
-            sequence
-        ));
-        std::fs::write(&script_path, script)?;
-        let script_arg = script_path.to_string_lossy().into_owned();
-        let output = new_command("diskpart").args(["/s", &script_arg]).output();
-        let _ = std::fs::remove_file(&script_path);
-        Ok(output?)
+    fn run_diskpart_script(script: &str, purpose: &str) -> Result<CommandOutcome> {
+        let prefix = format!("lr-{purpose}");
+        let output = lr_core::diskpart::execute_script(
+            &Self::reliable_temp_dir(),
+            &prefix,
+            "diskpart",
+            script,
+        )?;
+        lr_core::diskpart::validated_stdout(&output)
+            .map_err(|detail| anyhow::anyhow!("DiskPart 脚本执行失败 ({purpose}): {detail}"))?;
+        Ok(output)
     }
 
     pub fn new() -> Self {
@@ -68,7 +66,7 @@ detail volume
 
         let output = Self::run_diskpart_script(&script1, "find_disk")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::debug!("查找磁盘号:\n{}", stdout);
 
         let mut disk_num: Option<usize> = None;
@@ -103,7 +101,7 @@ list partition
 
         let output = Self::run_diskpart_script(&script2, "list_partitions")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::debug!("分区列表:\n{}", stdout);
 
         let mut esp_partition: Option<usize> = None;
@@ -145,7 +143,7 @@ assign letter={}
 
         let output = Self::run_diskpart_script(&script3, "assign_esp")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::debug!("分配 ESP 盘符:\n{}", stdout);
 
         std::thread::sleep(std::time::Duration::from_millis(500));

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lr_core::command::{CommandExecutor, CommandRequest, SystemCommandExecutor};
+use lr_core::command::{CommandExecutor, CommandOutcome, CommandRequest, SystemCommandExecutor};
 use std::path::{Path, PathBuf};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
@@ -27,6 +27,22 @@ fn get_diskpart_path() -> String {
         log::info!("使用系统 diskpart");
         "diskpart.exe".to_string()
     }
+}
+
+fn diskpart_reports_success(output: &str) -> bool {
+    let output = output.to_lowercase();
+    output.contains("成功")
+        || output.contains("successfully")
+        || output.contains("extended the volume")
+}
+
+fn diskpart_reports_no_space(output: &str) -> bool {
+    let output = output.to_lowercase();
+    output.contains("没有可用")
+        || output.contains("没有足够")
+        || output.contains("no usable")
+        || output.contains("not enough")
+        || output.contains("空间不足")
 }
 
 /// 分区表类型
@@ -133,6 +149,23 @@ impl DiskManager {
         // 统一走 system_utils::get_temp_directory（按 SystemRoot/PE系统盘动态解析，不写死 X:）
         crate::core::system_utils::get_temp_directory()
     }
+
+    fn execute_diskpart(prefix: &str, script: &str) -> Result<CommandOutcome> {
+        lr_core::diskpart::execute_script(
+            &Self::reliable_temp_dir(),
+            prefix,
+            get_diskpart_path(),
+            script,
+        )
+        .map_err(Into::into)
+    }
+
+    fn execute_diskpart_checked(prefix: &str, script: &str) -> Result<String> {
+        let output = Self::execute_diskpart(prefix, script)?;
+        lr_core::diskpart::validated_stdout(&output)
+            .map_err(|detail| anyhow::anyhow!("DiskPart 脚本执行失败: {detail}"))
+    }
+
     /// 获取所有固定磁盘分区列表
     pub fn get_partitions() -> Result<Vec<Partition>> {
         let mut partitions = Vec::new();
@@ -234,26 +267,10 @@ impl DiskManager {
     fn get_partition_style_diskpart(drive: &str) -> PartitionDetail {
         let letter = drive.chars().next().unwrap_or('C');
         let script = format!("select volume {}\ndetail volume", letter);
-
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("dp_style.txt");
-
-        if std::fs::write(&script_path, &script).is_err() {
-            return PartitionDetail {
-                style: PartitionStyle::Unknown,
-                disk_number: None,
-                partition_number: None,
-            };
-        }
-
-        let script_path_str = match script_path.to_str() {
-            Some(s) => s,
-            None => {
-                log::error!(
-                    "[disk] 临时脚本路径包含非 UTF-8 字符: {}",
-                    script_path.display()
-                );
-                let _ = std::fs::remove_file(&script_path);
+        let stdout = match Self::execute_diskpart_checked("lr-partition-detail", &script) {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                log::debug!("[disk] 无法查询卷 {} 的分区信息: {}", letter, error);
                 return PartitionDetail {
                     style: PartitionStyle::Unknown,
                     disk_number: None,
@@ -261,24 +278,6 @@ impl DiskManager {
                 };
             }
         };
-
-        let output = match new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()
-        {
-            Ok(o) => o,
-            Err(_) => {
-                let _ = std::fs::remove_file(&script_path);
-                return PartitionDetail {
-                    style: PartitionStyle::Unknown,
-                    disk_number: None,
-                    partition_number: None,
-                };
-            }
-        };
-
-        let _ = std::fs::remove_file(&script_path);
-        let stdout = gbk_to_utf8(&output.stdout);
 
         let mut disk_num: Option<u32> = None;
         let mut part_num: Option<u32> = None;
@@ -319,38 +318,17 @@ impl DiskManager {
         // DiskPart versions and languages. `uniqueid disk` is stable: GPT uses
         // a GUID and MBR uses an eight-digit hexadecimal disk signature.
         let script = format!("select disk {}\nuniqueid disk", disk_number);
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("dp_disk_style.txt");
-
-        if std::fs::write(&script_path, &script).is_err() {
-            return PartitionStyle::Unknown;
-        }
-
-        let script_path_str = match script_path.to_str() {
-            Some(s) => s,
-            None => {
-                log::error!(
-                    "[disk] 临时脚本路径包含非 UTF-8 字符: {}",
-                    script_path.display()
+        match Self::execute_diskpart_checked("lr-disk-style", &script) {
+            Ok(stdout) => Self::partition_style_from_unique_id_output(&stdout),
+            Err(error) => {
+                log::debug!(
+                    "[disk] 无法查询磁盘 {} 的分区表类型: {}",
+                    disk_number,
+                    error
                 );
-                let _ = std::fs::remove_file(&script_path);
-                return PartitionStyle::Unknown;
+                PartitionStyle::Unknown
             }
-        };
-
-        let output = match new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()
-        {
-            Ok(o) => o,
-            Err(_) => {
-                let _ = std::fs::remove_file(&script_path);
-                return PartitionStyle::Unknown;
-            }
-        };
-
-        let _ = std::fs::remove_file(&script_path);
-        Self::partition_style_from_unique_id_output(&gbk_to_utf8(&output.stdout))
+        }
     }
 
     fn partition_style_from_unique_id_output(output: &str) -> PartitionStyle {
@@ -747,32 +725,8 @@ impl DiskManager {
         log::info!("[CLEANUP] 删除分区 {}:", letter);
 
         let script_content = format!("select volume {}\ndelete partition override", letter);
-
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("lr_delete_part.txt");
-        std::fs::write(&script_path, &script_content)?;
-
-        let script_path_str = script_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
-        let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        let output_text = gbk_to_utf8(&output.stdout);
+        let output_text = Self::execute_diskpart_checked("lr-delete-partition", &script_content)?;
         log::info!("[CLEANUP] Diskpart 删除输出: {}", output_text);
-
-        // 检查是否有错误（但不要太严格，删除成功也可能包含一些警告）
-        let output_lower = output_text.to_lowercase();
-        let has_error = (output_lower.contains("error") || output_lower.contains("错误"))
-            && !output_lower.contains("成功")
-            && !output_lower.contains("successfully");
-
-        if has_error {
-            anyhow::bail!("删除分区失败: {}", output_text);
-        }
 
         log::info!("[CLEANUP] 分区 {} 删除成功", letter);
         Ok(())
@@ -815,35 +769,8 @@ impl DiskManager {
         log::info!("[CLEANUP] Step 1: 删除分区 {}:", auto_letter);
 
         let delete_script = format!("select volume {}\ndelete partition override", auto_letter);
-
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("lr_delete_part.txt");
-        std::fs::write(&script_path, &delete_script)?;
-
-        let script_path_str = script_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
-        let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        let output_text = gbk_to_utf8(&output.stdout);
+        let output_text = Self::execute_diskpart_checked("lr-delete-and-extend", &delete_script)?;
         log::info!("[CLEANUP] 删除分区输出: {}", output_text);
-
-        // 检查删除是否成功
-        let output_lower = output_text.to_lowercase();
-        let delete_failed = (output_lower.contains("error")
-            || output_lower.contains("错误")
-            || output_lower.contains("失败")
-            || output_lower.contains("failed"))
-            && !output_lower.contains("成功")
-            && !output_lower.contains("successfully");
-
-        if delete_failed {
-            anyhow::bail!("删除分区失败: {}", output_text);
-        }
 
         log::info!("[CLEANUP] 分区 {} 删除成功", auto_letter);
 
@@ -937,28 +864,12 @@ impl DiskManager {
 
     /// 运行 diskpart rescan 命令刷新磁盘信息
     fn diskpart_rescan() {
-        let script_content = "rescan";
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("lr_rescan.txt");
-
-        if std::fs::write(&script_path, script_content).is_ok() {
-            let Some(script_path_str) = script_path.to_str() else {
-                log::error!(
-                    "[CLEANUP] 临时脚本路径包含非 UTF-8 字符: {}",
-                    script_path.display()
-                );
-                let _ = std::fs::remove_file(&script_path);
-                return;
-            };
-            let output = new_command(&get_diskpart_path())
-                .args(["/s", script_path_str])
-                .output();
-
-            let _ = std::fs::remove_file(&script_path);
-
-            if let Ok(output) = output {
-                let output_text = gbk_to_utf8(&output.stdout);
-                log::info!("[CLEANUP] rescan 输出: {}", output_text);
+        match Self::execute_diskpart_checked("lr-rescan", "rescan") {
+            Ok(output) => log::info!("[CLEANUP] rescan 输出: {}", output),
+            Err(error) => {
+                // rescan is advisory here; the subsequent extend loop still
+                // performs its own retries and verification.
+                log::warn!("[CLEANUP] rescan 失败，将继续重试扩展: {}", error);
             }
         }
     }
@@ -968,51 +879,23 @@ impl DiskManager {
     fn try_extend_volume_enhanced(letter: char, disk_num: u32) -> Result<()> {
         // 方法1：通过卷字母扩展（标准方法）
         let extend_script = format!("select volume {}\nextend", letter);
-
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("lr_extend.txt");
-        std::fs::write(&script_path, &extend_script)?;
-
-        let script_path_str = script_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
-        let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        let output_text = gbk_to_utf8(&output.stdout);
-        let output_lower = output_text.to_lowercase();
+        let output = Self::execute_diskpart("lr-extend-volume", &extend_script)?;
+        let validation = lr_core::diskpart::validated_stdout(&output);
+        let output_text = match &validation {
+            Ok(text) | Err(text) => text,
+        };
 
         log::info!(
             "[CLEANUP] diskpart extend (by volume) 输出: {}",
             output_text
         );
 
-        // 检查是否成功 - 注意要排除包含失败/错误的情况
-        let has_success = output_lower.contains("成功")
-            || output_lower.contains("successfully")
-            || output_lower.contains("extended the volume");
-        let has_error = output_lower.contains("error")
-            || output_lower.contains("错误")
-            || output_lower.contains("失败")
-            || output_lower.contains("failed")
-            || output_lower.contains("没有可用")
-            || output_lower.contains("no usable")
-            || output_lower.contains("not enough")
-            || output_lower.contains("无法");
-
-        if has_success && !has_error {
+        if validation.is_ok() && diskpart_reports_success(output_text) {
             return Ok(());
         }
 
         // 检查是否有明确的错误：没有可用的未分配空间
-        if output_lower.contains("没有可用")
-            || output_lower.contains("no usable")
-            || output_lower.contains("not enough")
-            || output_lower.contains("空间不足")
-        {
+        if diskpart_reports_no_space(output_text) {
             // 没有可用的未分配空间，直接失败
             anyhow::bail!("没有可用的相邻未分配空间: {}", output_text);
         }
@@ -1027,54 +910,25 @@ impl DiskManager {
                 "select disk {}\nselect partition {}\nextend",
                 disk_num, part_num
             );
-
-            let script_path2 = temp_dir.join("lr_extend2.txt");
-            std::fs::write(&script_path2, &extend_script2)?;
-
-            let script_path2_str = script_path2
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
-            let output2 = new_command(&get_diskpart_path())
-                .args(["/s", script_path2_str])
-                .output()?;
-
-            let _ = std::fs::remove_file(&script_path2);
-
-            let output_text2 = gbk_to_utf8(&output2.stdout);
-            let output_lower2 = output_text2.to_lowercase();
+            let output2 = Self::execute_diskpart("lr-extend-partition", &extend_script2)?;
+            let validation2 = lr_core::diskpart::validated_stdout(&output2);
+            let output_text2 = match &validation2 {
+                Ok(text) | Err(text) => text,
+            };
 
             log::info!(
                 "[CLEANUP] diskpart extend (by partition) 输出: {}",
                 output_text2
             );
 
-            let has_success2 = output_lower2.contains("成功")
-                || output_lower2.contains("successfully")
-                || output_lower2.contains("extended the volume");
-            let has_error2 = output_lower2.contains("error")
-                || output_lower2.contains("错误")
-                || output_lower2.contains("失败")
-                || output_lower2.contains("failed")
-                || output_lower2.contains("没有可用")
-                || output_lower2.contains("no usable");
-
-            if has_success2 && !has_error2 {
+            if validation2.is_ok() && diskpart_reports_success(output_text2) {
                 return Ok(());
             }
 
-            // 备用方法也失败了，返回备用方法的错误信息
-            if has_error2 {
-                anyhow::bail!("extend 失败 (备用方法): {}", output_text2);
-            }
+            anyhow::bail!("extend 失败 (备用方法): {}", output_text2);
         }
 
-        // 都失败了，返回第一次的错误
-        if has_error {
-            anyhow::bail!("extend 失败: {}", output_text);
-        }
-
-        // 不确定状态，假设失败
-        anyhow::bail!("extend 状态不确定: {}", output_text)
+        anyhow::bail!("extend 失败: {}", output_text)
     }
 
     /// 无损扩大分区到指定大小（仅并入紧邻其后的未分配空间；不移动其它分区）。
@@ -1107,36 +961,20 @@ impl DiskManager {
             None => format!("select volume {}\r\nextend\r\n", letter),
         };
 
-        let temp_dir = Self::reliable_temp_dir();
-        let script_path = temp_dir.join("lr_expand.txt");
-        std::fs::write(&script_path, &script)?;
-        let script_path_str = script_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
-        let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path_str])
-            .output()?;
-        let _ = std::fs::remove_file(&script_path);
-
-        let text = gbk_to_utf8(&output.stdout);
-        let lower = text.to_lowercase();
+        let output = Self::execute_diskpart("lr-expand-lossless", &script)?;
+        let validation = lr_core::diskpart::validated_stdout(&output);
+        let text = match &validation {
+            Ok(text) | Err(text) => text,
+        };
         log::info!("[EXPAND] diskpart 输出: {}", text);
 
-        let has_success = lower.contains("成功")
-            || lower.contains("successfully")
-            || lower.contains("extended the volume");
-        let no_space = lower.contains("没有可用")
-            || lower.contains("no usable")
-            || lower.contains("not enough")
-            || lower.contains("空间不足");
-
-        if no_space {
+        if diskpart_reports_no_space(text) {
             anyhow::bail!(
                 "{}",
                 tr!("C 盘后面没有相邻的未分配空间可并入。若要从后面的分区夺取空间，需要分区移动功能（暂未启用）。")
             );
         }
-        if !has_success {
+        if validation.is_err() || !diskpart_reports_success(text) {
             anyhow::bail!("{}", tr!("扩容失败: {}", text));
         }
 
@@ -1161,7 +999,7 @@ impl DiskManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{DiskManager, PartitionStyle};
+    use super::{diskpart_reports_no_space, diskpart_reports_success, DiskManager, PartitionStyle};
 
     #[test]
     fn parses_diskpart_unique_ids_without_depending_on_language() {
@@ -1179,5 +1017,22 @@ mod tests {
             DiskManager::partition_style_from_unique_id_output("DiskPart failed"),
             PartitionStyle::Unknown
         );
+    }
+
+    #[test]
+    fn classifies_localized_extend_results() {
+        assert!(diskpart_reports_success(
+            "DiskPart successfully extended the volume."
+        ));
+        assert!(diskpart_reports_success("DiskPart 成功扩展了卷。"));
+        assert!(diskpart_reports_no_space(
+            "There is not enough usable free space on specified disk(s)."
+        ));
+        assert!(diskpart_reports_no_space(
+            "没有足够的可用空间来执行此操作。"
+        ));
+        assert!(!diskpart_reports_success(
+            "DiskPart failed to extend the volume."
+        ));
     }
 }

@@ -41,8 +41,6 @@ use windows::Win32::System::IO::DeviceIoControl;
 
 use crate::core::disk::{DiskManager, PartitionStyle};
 use crate::tr;
-use crate::utils::command::new_command;
-use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 
 const MIB: u64 = 1024 * 1024;
@@ -102,14 +100,10 @@ fn diskpart_path() -> String {
 /// 运行一段 diskpart 脚本，返回标准输出（GBK→UTF8）。
 fn run_diskpart(script: &str) -> Result<String> {
     let temp_dir = crate::core::system_utils::get_temp_directory();
-    std::fs::create_dir_all(&temp_dir).ok();
-    let script_path = temp_dir.join("lr_expand_move.txt");
-    std::fs::write(&script_path, script)?;
-    let output = new_command(&diskpart_path())
-        .args(["/s", script_path.to_str().unwrap()])
-        .output()?;
-    let _ = std::fs::remove_file(&script_path);
-    Ok(gbk_to_utf8(&output.stdout))
+    let output =
+        lr_core::diskpart::execute_script(&temp_dir, "lr-expand-move", diskpart_path(), script)?;
+    lr_core::diskpart::validated_stdout(&output)
+        .map_err(|detail| anyhow!("DiskPart 脚本执行失败: {detail}"))
 }
 
 fn diskpart_ok(text: &str) -> bool {

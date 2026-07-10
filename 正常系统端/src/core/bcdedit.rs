@@ -1,6 +1,5 @@
 use anyhow::Result;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::tr;
@@ -8,8 +7,8 @@ use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 use lr_core::boot_pca::BootPcaMode;
+use lr_core::command::CommandOutcome;
 
-static DISKPART_SCRIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static ESP_MOUNT_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct BootManager {
@@ -26,20 +25,13 @@ impl BootManager {
         }
     }
 
-    fn run_diskpart_script(script: &str, purpose: &str) -> Result<std::process::Output> {
-        let sequence = DISKPART_SCRIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let script_path = std::env::temp_dir().join(format!(
-            "lr_{purpose}_{}_{}.txt",
-            std::process::id(),
-            sequence
-        ));
-        std::fs::write(&script_path, script)?;
-        let script_arg = script_path.to_string_lossy().into_owned();
-        let output = create_command("diskpart")
-            .args(["/s", &script_arg])
-            .output();
-        let _ = std::fs::remove_file(&script_path);
-        Ok(output?)
+    fn run_diskpart_script(script: &str, purpose: &str) -> Result<CommandOutcome> {
+        let prefix = format!("lr-{purpose}");
+        let output =
+            lr_core::diskpart::execute_script(&std::env::temp_dir(), &prefix, "diskpart", script)?;
+        lr_core::diskpart::validated_stdout(&output)
+            .map_err(|detail| anyhow::anyhow!("DiskPart 脚本执行失败 ({purpose}): {detail}"))?;
+        Ok(output)
     }
 
     /// 获取当前系统引导 GUID
@@ -88,7 +80,7 @@ detail volume
 
         let output = Self::run_diskpart_script(&script1, "find_disk")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::info!("[BOOT] 查找磁盘号:\n{}", stdout);
 
         // 解析磁盘号
@@ -125,7 +117,7 @@ list partition
 
         let output = Self::run_diskpart_script(&script2, "list_partitions")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::info!("[BOOT] 分区列表:\n{}", stdout);
 
         // 查找 System/系统 类型的分区（ESP）
@@ -170,7 +162,7 @@ assign letter={}
 
         let output = Self::run_diskpart_script(&script3, "assign_esp")?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
+        let stdout = gbk_to_utf8(output.stdout());
         log::info!("[BOOT] 分配 ESP 盘符:\n{}", stdout);
 
         // 等待盘符生效
@@ -245,14 +237,14 @@ list partition
                 disk
             );
 
-            let script_path = std::env::temp_dir().join("check_disk.txt");
-            std::fs::write(&script_path, &script)?;
-
-            let output = create_command("diskpart")
-                .args(["/s", &script_path.to_string_lossy()])
-                .output()?;
-
-            let stdout = gbk_to_utf8(&output.stdout);
+            let output = match Self::run_diskpart_script(&script, "scan_esp") {
+                Ok(output) => output,
+                Err(error) => {
+                    log::debug!("[BOOT] 跳过无法查询的磁盘 {disk}: {error}");
+                    continue;
+                }
+            };
+            let stdout = gbk_to_utf8(output.stdout());
 
             // 查找 System 类型分区
             for line in stdout.lines() {
@@ -273,12 +265,17 @@ assign letter={}
                                         disk, part_num, mount_letter
                                     );
 
-                                    let assign_path = std::env::temp_dir().join("assign_esp2.txt");
-                                    std::fs::write(&assign_path, &assign_script)?;
-
-                                    let _ = create_command("diskpart")
-                                        .args(["/s", &assign_path.to_string_lossy()])
-                                        .output();
+                                    if let Err(error) =
+                                        Self::run_diskpart_script(&assign_script, "assign_esp")
+                                    {
+                                        log::warn!(
+                                            "[BOOT] 无法挂载磁盘 {} 分区 {}: {}",
+                                            disk,
+                                            part_num,
+                                            error
+                                        );
+                                        continue;
+                                    }
 
                                     std::thread::sleep(std::time::Duration::from_millis(500));
 
@@ -449,12 +446,7 @@ assign letter={}
             "select disk {}\r\nselect partition {}\r\nassign letter={}\r\n",
             disk_num, part, free
         );
-        let p = std::env::temp_dir().join("lr_bp_asg.txt");
-        std::fs::write(&p, script.as_bytes())?;
-        let _ = create_command("diskpart")
-            .args(["/s", &p.to_string_lossy()])
-            .output()?;
-        let _ = std::fs::remove_file(&p);
+        Self::run_diskpart_script(&script, "assign_boot_partition")?;
         std::thread::sleep(std::time::Duration::from_millis(600));
         let letter = format!("{}:", free);
         if !Path::new(&format!("{}\\", letter)).exists() {
@@ -474,17 +466,12 @@ assign letter={}
             "select disk {}\r\nselect partition {}\r\nactive\r\n",
             disk_num, part_num
         );
-        let p = std::env::temp_dir().join("lr_set_active.txt");
-        std::fs::write(&p, script.as_bytes())?;
-        let out = create_command("diskpart")
-            .args(["/s", &p.to_string_lossy()])
-            .output()?;
-        let _ = std::fs::remove_file(&p);
+        let out = Self::run_diskpart_script(&script, "set_active")?;
         log::info!(
             "[BOOT] 设活动分区 磁盘{}:分区{}: {}",
             disk_num,
             part_num,
-            gbk_to_utf8(&out.stdout).trim()
+            gbk_to_utf8(out.stdout()).trim()
         );
         Ok(())
     }
@@ -494,16 +481,11 @@ assign letter={}
     fn set_partition_active_by_letter(&self, boot_letter: &str) -> Result<()> {
         let vol = boot_letter.trim_end_matches('\\').trim_end_matches(':');
         let script = format!("select volume {}\r\nactive\r\n", vol);
-        let p = std::env::temp_dir().join("lr_set_active_vol.txt");
-        std::fs::write(&p, script.as_bytes())?;
-        let out = create_command("diskpart")
-            .args(["/s", &p.to_string_lossy()])
-            .output()?;
-        let _ = std::fs::remove_file(&p);
+        let out = Self::run_diskpart_script(&script, "set_active_volume")?;
         log::info!(
             "[BOOT] 设活动分区 卷{}: {}",
             vol,
-            gbk_to_utf8(&out.stdout).trim()
+            gbk_to_utf8(out.stdout()).trim()
         );
         Ok(())
     }

@@ -1,75 +1,8 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from 'react'
-
-export type Lang = 'zh' | 'en'
-
-const STORAGE_KEY = 'letrecovery-lang'
-
-function detectInitial(): Lang {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved === 'zh' || saved === 'en') return saved
-  } catch {
-    /* ignore */
-  }
-  if (
-    typeof navigator !== 'undefined' &&
-    !navigator.language.toLowerCase().startsWith('zh')
-  ) {
-    return 'en'
-  }
-  return 'zh'
-}
-
-interface LangContextValue {
-  lang: Lang
-  setLang: (l: Lang) => void
-}
-
-const LangContext = createContext<LangContextValue>({
-  lang: 'zh',
-  setLang: () => {},
-})
-
-export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(detectInitial)
-
-  useEffect(() => {
-    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'
-  }, [lang])
-
-  const setLang = (l: Lang) => {
-    setLangState(l)
-    try {
-      localStorage.setItem(STORAGE_KEY, l)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return (
-    <LangContext.Provider value={{ lang, setLang }}>
-      {children}
-    </LangContext.Provider>
-  )
-}
-
-export function useLang() {
-  return useContext(LangContext)
-}
-
-export function useT(): Dict {
-  return translations[useLang().lang]
-}
+import type { Lang } from './i18n-context'
 
 /* ========================== 翻译字典 ========================== */
 
-interface Dict {
+export interface Dict {
   nav: {
     home: string
     docs: string
@@ -348,4 +281,4 @@ const en: Dict = {
   },
 }
 
-const translations: Record<Lang, Dict> = { zh, en }
+export const translations: Record<Lang, Dict> = { zh, en }

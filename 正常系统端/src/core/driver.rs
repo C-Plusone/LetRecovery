@@ -9,7 +9,9 @@ use anyhow::Result;
 
 use crate::tr;
 
-// 共享的驱动类型从 lr-core 再导出（调用方无需改动）。
+// 共享的驱动类型从 lr-core 再导出（调用方无需改动）。DriverInfo 当前仅作为
+// 兼容再导出保留，二进制内部暂未直接引用。
+#[allow(unused_imports)]
 pub use lr_core::driver::{DriverInfo, DriverManager};
 
 /// 离线驱动导入：优先使用 dism.exe，失败再回退到 lr-core 的传统方法。

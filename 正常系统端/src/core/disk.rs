@@ -1,6 +1,5 @@
 use crate::core::bitlocker::{BitLockerManager, VolumeStatus};
 use crate::tr;
-use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 use anyhow::Result;
@@ -43,6 +42,12 @@ fn get_diskpart_path() -> String {
         log::debug!("使用系统 diskpart");
         "diskpart.exe".to_string()
     }
+}
+
+fn execute_diskpart_checked(program: &str, prefix: &str, script: &str) -> Result<String> {
+    let output = lr_core::diskpart::execute_script(&std::env::temp_dir(), prefix, program, script)?;
+    lr_core::diskpart::validated_stdout(&output)
+        .map_err(|detail| anyhow::anyhow!("DiskPart 脚本执行失败: {detail}"))
 }
 
 /// 自动创建分区的标志文件名
@@ -408,22 +413,11 @@ impl DiskManager {
             new_letter.chars().next().unwrap_or('Y').to_ascii_lowercase()
         );
 
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("dp_script.txt");
-        std::fs::write(&script_path, &script_content)?;
-
-        let output = create_command(&get_diskpart_path())
-            .args([
-                "/s",
-                script_path
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-            ])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        Ok(gbk_to_utf8(&output.stdout))
+        execute_diskpart_checked(
+            &get_diskpart_path(),
+            "lr-shrink-create-partition",
+            &script_content,
+        )
     }
 
     /// 删除指定分区
@@ -433,22 +427,7 @@ impl DiskManager {
             partition_letter.chars().next().unwrap_or('Y')
         );
 
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("dp_delete.txt");
-        std::fs::write(&script_path, &script_content)?;
-
-        let output = create_command(&get_diskpart_path())
-            .args([
-                "/s",
-                script_path
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-            ])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        Ok(gbk_to_utf8(&output.stdout))
+        execute_diskpart_checked(&get_diskpart_path(), "lr-delete-partition", &script_content)
     }
 
     /// 检查指定分区是否包含有效的 Windows 系统
@@ -639,60 +618,52 @@ impl DiskManager {
     pub fn query_shrink_max(letter: char) -> Result<u64> {
         let script_content = format!("select volume {}\nshrink querymax", letter);
 
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("lr_query_shrink.txt");
-        std::fs::write(&script_path, &script_content)?;
-
         // 首先尝试使用内置 diskpart，如果失败则使用系统 diskpart
         let diskpart_path = get_diskpart_path();
-        let output = create_command(&diskpart_path)
-            .args([
-                "/s",
-                script_path
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-            ])
-            .output()?;
-
-        let output_text = gbk_to_utf8(&output.stdout);
-        let error_text = gbk_to_utf8(&output.stderr);
+        let output = lr_core::diskpart::execute_script(
+            &std::env::temp_dir(),
+            "lr-query-shrink",
+            &diskpart_path,
+            &script_content,
+        )?;
+        let output_text = gbk_to_utf8(output.stdout());
+        let validation = lr_core::diskpart::validated_stdout(&output);
 
         log::info!("[DISK] Shrink querymax 使用: {}", diskpart_path);
         log::info!(
             "[DISK] Shrink querymax stdout 长度: {} 字节",
-            output.stdout.len()
+            output.stdout().len()
         );
         log::info!("[DISK] Shrink querymax 输出: {}", output_text);
-        if !error_text.is_empty() {
-            log::error!("[DISK] Shrink querymax 错误: {}", error_text);
-        }
 
-        // 如果输出为空且使用的是内置 diskpart，尝试使用系统 diskpart
-        let output_text = if output_text.trim().is_empty() || output.stdout.len() < 50 {
-            log::warn!("[DISK] 内置 diskpart 输出异常，尝试使用系统 diskpart");
+        // 内置副本输出异常或明确失败时，使用系统 DiskPart 重试一次。
+        let output_text =
+            if validation.is_err() || output_text.trim().is_empty() || output.stdout().len() < 50 {
+                if let Err(detail) = &validation {
+                    log::warn!("[DISK] 内置 diskpart 查询失败，尝试系统副本: {}", detail);
+                } else {
+                    log::warn!("[DISK] 内置 diskpart 输出异常，尝试使用系统 diskpart");
+                }
 
-            let sys_output = create_command("diskpart.exe")
-                .args([
-                    "/s",
-                    script_path
-                        .to_str()
-                        .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-                ])
-                .output()?;
+                let sys_output = lr_core::diskpart::execute_script(
+                    &std::env::temp_dir(),
+                    "lr-query-shrink-system",
+                    "diskpart.exe",
+                    &script_content,
+                )?;
+                let sys_output_text = lr_core::diskpart::validated_stdout(&sys_output)
+                    .map_err(|detail| anyhow::anyhow!("DiskPart 查询可缩小空间失败: {detail}"))?;
+                log::info!(
+                    "[DISK] 系统 diskpart stdout 长度: {} 字节",
+                    sys_output.stdout().len()
+                );
+                log::info!("[DISK] 系统 diskpart 输出: {}", sys_output_text);
 
-            let sys_output_text = gbk_to_utf8(&sys_output.stdout);
-            log::info!(
-                "[DISK] 系统 diskpart stdout 长度: {} 字节",
-                sys_output.stdout.len()
-            );
-            log::info!("[DISK] 系统 diskpart 输出: {}", sys_output_text);
-
-            sys_output_text
-        } else {
-            output_text
-        };
-
-        let _ = std::fs::remove_file(&script_path);
+                sys_output_text
+            } else {
+                validation
+                    .map_err(|detail| anyhow::anyhow!("DiskPart 查询可缩小空间失败: {detail}"))?
+            };
 
         // 解析输出，查找可回收的最大空间
         // 英文: "The maximum number of reclaimable bytes is: XXX MB"
@@ -916,46 +887,15 @@ impl DiskManager {
             source_letter, actual_size_mb, new_letter
         );
 
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("lr_shrink_script.txt");
-        std::fs::write(&script_path, &script_content)?;
-
         log::info!("[DISK] Diskpart 脚本内容:\n{}", script_content);
 
-        let output = create_command(&get_diskpart_path())
-            .args([
-                "/s",
-                script_path
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-            ])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        let output_text = gbk_to_utf8(&output.stdout);
-        let error_text = gbk_to_utf8(&output.stderr);
+        let output_text = execute_diskpart_checked(
+            &get_diskpart_path(),
+            "lr-create-recovery-partition",
+            &script_content,
+        )?;
 
         log::info!("[DISK] Diskpart 输出: {}", output_text);
-        if !error_text.is_empty() {
-            log::error!("[DISK] Diskpart 错误: {}", error_text);
-        }
-
-        // 检查输出是否包含错误信息
-        let output_lower = output_text.to_lowercase();
-        if output_lower.contains("error")
-            || output_lower.contains("错误")
-            || output_lower.contains("失败")
-            || output_lower.contains("failed")
-            || output_lower.contains("无效")
-            || output_lower.contains("invalid")
-            || output_lower.contains("不支持")
-            || output_lower.contains("无法")
-            || output_lower.contains("拒绝")
-            || output_lower.contains("denied")
-        {
-            anyhow::bail!("{}", tr!("Diskpart 执行失败: {}", output_text));
-        }
 
         // 等待系统识别新分区
         std::thread::sleep(std::time::Duration::from_secs(2));
@@ -1022,22 +962,11 @@ impl DiskManager {
 
         let script_content = format!("select volume {}\ndelete partition override", letter);
 
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("lr_delete_script.txt");
-        std::fs::write(&script_path, &script_content)?;
-
-        let output = create_command(&get_diskpart_path())
-            .args([
-                "/s",
-                script_path
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?,
-            ])
-            .output()?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        let output_text = gbk_to_utf8(&output.stdout);
+        let output_text = execute_diskpart_checked(
+            &get_diskpart_path(),
+            "lr-delete-recovery-partition",
+            &script_content,
+        )?;
         log::info!("[DISK] Diskpart 删除输出: {}", output_text);
 
         Ok(())

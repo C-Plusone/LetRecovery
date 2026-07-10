@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Github, Globe, ExternalLink } from 'lucide-react'
-import { useT } from '@/lib/i18n'
+import { useT } from '@/lib/i18n-hooks'
 
 interface Contributor {
   name: string

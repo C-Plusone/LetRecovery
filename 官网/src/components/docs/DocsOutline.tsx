@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { Heading } from '@/lib/docs'
-import { useT } from '@/lib/i18n'
+import { useT } from '@/lib/i18n-hooks'
 import { cn } from '@/lib/utils'
 
 /** 右侧"本页大纲" —— 仿 coss.com/ui。高亮用"确定性滚动位置"判定（不会来回闪），

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useT } from '@/lib/i18n'
+import { useT } from '@/lib/i18n-hooks'
 
 const NotFound: React.FC = () => {
   const t = useT()

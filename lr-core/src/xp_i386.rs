@@ -539,25 +539,20 @@ fn ini_header_name(line: &str) -> Option<&str> {
 
 /// 用 diskpart 把指定盘符（如 `"C"`）的卷标记为「活动分区」。仅 MBR 有意义。
 fn set_volume_active(letter: &str) -> Result<String, String> {
-    use std::io::Write;
     let script = format!("select volume {letter}\r\nactive\r\nexit\r\n");
-    let tmp = std::env::temp_dir().join("lr_xp_set_active.txt");
-    {
-        let mut f =
-            std::fs::File::create(&tmp).map_err(|e| format!("创建 diskpart 脚本失败: {e}"))?;
-        f.write_all(script.as_bytes())
-            .map_err(|e| format!("写 diskpart 脚本失败: {e}"))?;
-    }
-    let tmp_str = tmp.to_string_lossy().into_owned();
-    let out = new_command("diskpart")
-        .args(["/s", tmp_str.as_str()])
-        .output()
-        .map_err(|e| format!("diskpart 执行失败: {e}"))?;
-    let _ = std::fs::remove_file(&tmp);
-    let so = gbk_to_utf8(&out.stdout);
-    if !out.status.success() {
-        return Err(format!("diskpart 返回非 0: {}", so.trim()));
-    }
+    let out = crate::diskpart::execute_script(
+        &std::env::temp_dir(),
+        "lr-xp-set-active",
+        "diskpart",
+        &script,
+    )
+    .map_err(|e| format!("diskpart 执行失败: {e}"))?;
+    let so = crate::diskpart::validated_stdout(&out).map_err(|detail| {
+        format!(
+            "diskpart 未能把 {letter}: 设为活动分区（可能目标是 GPT/动态盘/逻辑分区，无法设活动）：\n{}",
+            detail.trim()
+        )
+    })?;
     // diskpart 即使内部失败（目标是 GPT/动态盘/逻辑分区，无法设活动）也常返回 0，故再按输出里的错误标志判一次。
     // 用【否定检测】：只有命中已知错误词才算失败，绝不会把成功误判为失败 → 不会挡住本能正常设活动的盘。
     if diskpart_reported_failure(&so) {

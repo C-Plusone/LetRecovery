@@ -31,6 +31,9 @@ export default defineConfig({
       output: {
         entryFileNames: 'js/main.js',
         chunkFileNames: 'js/[name].js',
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+        },
         assetFileNames: (assetInfo) => {
           if (assetInfo.name?.endsWith('.css')) {
             return 'css/style.css'

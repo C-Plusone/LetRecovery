@@ -25,8 +25,9 @@ import {
   CommandPanel,
 } from '@/components/ui/command'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
-import { getSidebar, getDocPage } from '@/lib/docs'
-import { useLang, useT } from '@/lib/i18n'
+import { getDocPage } from '@/lib/docs'
+import { getSidebar } from '@/lib/docs-navigation'
+import { useLang, useT } from '@/lib/i18n-hooks'
 import { cn } from '@/lib/utils'
 
 interface SearchItem {

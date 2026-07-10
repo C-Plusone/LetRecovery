@@ -12,6 +12,14 @@ use crate::ui::advanced_options::AdvancedOptions;
 use crate::ui::pe_preparation::require_verified_cached_pe;
 use lr_core::command::{CommandExecutor, SystemCommandExecutor};
 
+fn execute_diskpart_script(prefix: &str, script: &str) -> Result<String, String> {
+    let output =
+        lr_core::diskpart::execute_script(&std::env::temp_dir(), prefix, "diskpart", script)
+            .map_err(|error| format!("无法启动 DiskPart: {error}"))?;
+    lr_core::diskpart::validated_stdout(&output)
+        .map_err(|detail| format!("DiskPart 脚本执行失败: {detail}"))
+}
+
 impl App {
     pub fn show_install_progress(&mut self, ui: &mut egui::Ui) {
         ui.heading(tr!("安装进度"));
@@ -1247,20 +1255,8 @@ fn resolve_install_target(
         "select disk {}\r\nselect partition {}\r\nremove noerr\r\nassign letter={}\r\nexit\r\n",
         td, tp, free
     );
-    let tmp = std::env::temp_dir().join("lr_assign_target.txt");
-    std::fs::write(&tmp, script.as_bytes()).map_err(|e| format!("写分配盘符脚本失败: {}", e))?;
-    let tmp_str = tmp.to_string_lossy().into_owned();
-    let dp_out = match crate::utils::cmd::create_command("diskpart")
-        .args(["/s", tmp_str.as_str()])
-        .output()
-    {
-        Ok(o) => crate::utils::encoding::gbk_to_utf8(&o.stdout),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("运行 diskpart 分配盘符失败: {}", e));
-        }
-    };
-    let _ = std::fs::remove_file(&tmp);
+    let dp_out = execute_diskpart_script("lr-assign-target", &script)
+        .map_err(|error| format!("运行 DiskPart 分配盘符失败: {error}"))?;
     log::info!(
         "[INSTALL] 给目标 磁盘{}:分区{} 挂盘符 {}：\n{}",
         td,
@@ -1304,17 +1300,8 @@ fn resolve_install_target(
 /// 绝不改动已有的有效签名（解析不到 8 位十六进制——例如 GPT 的 GUID——也一律跳过，保守处理）。
 fn ensure_mbr_disk_signature(disk: u32) -> Result<String, String> {
     let run = |script: &str, tag: &str| -> Result<String, String> {
-        let tmp = std::env::temp_dir().join(format!("lr_sig_{}.txt", tag));
-        std::fs::write(&tmp, script.as_bytes()).map_err(|e| format!("写{}脚本失败: {}", tag, e))?;
-        let tmp_str = tmp.to_string_lossy().into_owned();
-        let out = crate::utils::cmd::create_command("diskpart")
-            .args(["/s", tmp_str.as_str()])
-            .output();
-        let _ = std::fs::remove_file(&tmp);
-        match out {
-            Ok(o) => Ok(crate::utils::encoding::gbk_to_utf8(&o.stdout)),
-            Err(e) => Err(format!("运行 diskpart({}) 失败: {}", tag, e)),
-        }
+        execute_diskpart_script(&format!("lr-signature-{tag}"), script)
+            .map_err(|error| format!("运行 DiskPart({tag}) 失败: {error}"))
     };
 
     // 1) 读当前磁盘 ID（MBR 签名）。
@@ -1523,23 +1510,16 @@ fn deactivate_sibling_active_partitions(target: &str, partitions: &[Partition]) 
         let pl = p.letter.trim_end_matches('\\').trim_end_matches(':');
         if p.disk_number == Some(target_disk) && !pl.is_empty() && !pl.eq_ignore_ascii_case(tl) {
             let script = format!("select volume {}\r\ninactive\r\nexit\r\n", pl);
-            let tmp = std::env::temp_dir().join("lr_xp_deactivate.txt");
-            if std::fs::write(&tmp, script.as_bytes()).is_err() {
-                continue;
-            }
-            let tmp_str = tmp.to_string_lossy().into_owned();
-            let out = crate::utils::cmd::create_command("diskpart")
-                .args(["/s", tmp_str.as_str()])
-                .output();
-            let _ = std::fs::remove_file(&tmp);
-            match out {
-                Ok(o) => log::info!(
+            match execute_diskpart_script("lr-xp-deactivate", &script) {
+                Ok(output) => log::info!(
                     "[ACTIVE] 已尝试清同盘分区 {}: 的活动标志（disk {}）：{}",
                     pl,
                     target_disk,
-                    crate::utils::encoding::gbk_to_utf8(&o.stdout).trim()
+                    output.trim()
                 ),
-                Err(e) => log::warn!("[ACTIVE] 清 {}: 活动标志失败（忽略）：{}", pl, e),
+                Err(error) => {
+                    log::warn!("[ACTIVE] 清 {}: 活动标志失败（忽略）：{}", pl, error)
+                }
             }
         }
     }

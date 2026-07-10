@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Github, Sun, Moon, Menu, Check, Languages } from 'lucide-react'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Menu as DropdownMenu,
@@ -16,10 +16,9 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import DocsSidebar from '@/components/docs/DocsSidebar'
-import DocsSearch from '@/components/docs/DocsSearch'
-import { getSidebar } from '@/lib/docs'
+import { getSidebar } from '@/lib/docs-navigation'
 import { useTheme } from '@/hooks/useTheme'
-import { useLang, useT } from '@/lib/i18n'
+import { useLang, useT } from '@/lib/i18n-hooks'
 import { CircleHalf } from '@/components/icons/CircleHalf'
 import { cn } from '@/lib/utils'
 
@@ -31,6 +30,7 @@ const navItems = [
 ] as const
 
 const GITHUB_URL = 'https://github.com/NORMAL-EX/LetRecovery'
+const DocsSearch = lazy(() => import('@/components/docs/DocsSearch'))
 
 const Header: React.FC = () => {
   const { theme, setTheme, resolvedTheme } = useTheme()
@@ -227,7 +227,11 @@ const Header: React.FC = () => {
             aria-hidden="true"
           />
 
-          <DocsSearch active={isDocs} />
+          {isDocs && (
+            <Suspense fallback={<div className="size-9" aria-hidden="true" />}>
+              <DocsSearch active />
+            </Suspense>
+          )}
           {githubButton}
           {languageMenu}
           {themeMenu}

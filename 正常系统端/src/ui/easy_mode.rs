@@ -176,12 +176,12 @@ impl App {
 
         // 使用 egui 原版风格的 Frame
         let frame = if is_selected {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(ui.visuals().selection.bg_fill)
                 .stroke(egui::Stroke::new(2.0, ui.visuals().selection.stroke.color))
                 .inner_margin(12.0)
         } else {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(ui.visuals().widgets.noninteractive.bg_fill)
                 .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                 .inner_margin(12.0)
@@ -205,7 +205,7 @@ impl App {
                 let top_response = ui.allocate_rect(top_rect, egui::Sense::click());
 
                 // 在点击区域内绘制内容
-                ui.allocate_ui_at_rect(top_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top_rect), |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(5.0);
 
@@ -258,7 +258,7 @@ impl App {
                             // 使用唯一的 ID
                             let combo_id = egui::Id::new(format!("easy_vol_combo_{}", idx));
 
-                            egui::ComboBox::from_id_source(combo_id)
+                            egui::ComboBox::from_id_salt(combo_id)
                                 .selected_text(selected_vol_name)
                                 .width(width - 50.0)
                                 .show_ui(ui, |ui| {
