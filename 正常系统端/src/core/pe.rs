@@ -3,6 +3,11 @@ use crate::utils::cmd::create_command;
 use anyhow::Result;
 use std::path::Path;
 
+use lr_core::cached_artifact::{
+    inspect_cached_artifact, verify_cached_artifact, CachedArtifactError, CachedArtifactPresence,
+    CachedArtifactStatus,
+};
+
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::{get_bin_dir, get_exe_dir};
 
@@ -21,25 +26,56 @@ impl PeManager {
         }
     }
 
-    /// 检查PE文件是否存在
-    /// 返回 (存在, 完整路径)
-    pub fn check_pe_exists(filename: &str) -> (bool, String) {
-        // 检查多个可能的位置（新布局优先：bin\pe）
-        let locations = [
-            get_bin_dir().join("pe").join(filename),
-            get_exe_dir().join(filename),
-            get_exe_dir().join("PE").join(filename),
-            get_exe_dir().join("pe").join(filename),
-            dirs::download_dir().unwrap_or_default().join(filename),
+    fn cache_directories() -> Vec<std::path::PathBuf> {
+        let exe_dir = get_exe_dir();
+        let mut directories = vec![
+            get_bin_dir().join("pe"),
+            exe_dir.clone(),
+            exe_dir.join("PE"),
+            exe_dir.join("pe"),
         ];
+        if let Some(download_dir) = dirs::download_dir() {
+            directories.push(download_dir);
+        }
+        directories
+    }
 
-        for path in &locations {
-            if path.exists() {
-                return (true, path.to_string_lossy().to_string());
+    /// Validate PE metadata and locate a regular cache file without hashing it.
+    /// Full verification is performed in the worker immediately before use.
+    pub fn find_cached_pe(
+        filename: &str,
+        sha256: Option<&str>,
+        md5: Option<&str>,
+    ) -> std::result::Result<CachedArtifactPresence, CachedArtifactError> {
+        inspect_cached_artifact(filename, &Self::cache_directories(), sha256, md5)
+    }
+
+    /// 查找并校验缓存的 PE 文件。
+    ///
+    /// 文件名来自服务器配置，因此在拼接路径前必须先通过单文件名校验；
+    /// SHA-256 优先于兼容字段 MD5。声明过的校验值无法验证时会失败关闭。
+    pub fn check_cached_pe(
+        filename: &str,
+        sha256: Option<&str>,
+        md5: Option<&str>,
+    ) -> std::result::Result<CachedArtifactStatus, CachedArtifactError> {
+        verify_cached_artifact(filename, &Self::cache_directories(), sha256, md5)
+    }
+
+    /// 仅检查 PE 文件是否存在的兼容接口。
+    ///
+    /// 高权限操作在真正使用 PE 前必须调用 `check_cached_pe` 并提供服务端校验值。
+    pub fn check_pe_exists(filename: &str) -> (bool, String) {
+        match Self::find_cached_pe(filename, None, None) {
+            Ok(CachedArtifactPresence::Present { path, .. }) => {
+                (true, path.to_string_lossy().into_owned())
+            }
+            Ok(CachedArtifactPresence::Missing) => (false, String::new()),
+            Err(error) => {
+                log::warn!("[PE] Rejected cached PE lookup for {filename:?}: {error}");
+                (false, String::new())
             }
         }
-
-        (false, String::new())
     }
 
     /// 检查是否为UEFI启动

@@ -9,6 +9,7 @@ use crate::core::ghost::Ghost;
 use crate::core::install_config::{ConfigFileManager, InstallConfig};
 use crate::tr;
 use crate::ui::advanced_options::AdvancedOptions;
+use crate::ui::pe_preparation::require_verified_cached_pe;
 
 impl App {
     pub fn show_install_progress(&mut self, ui: &mut egui::Ui) {
@@ -780,16 +781,19 @@ impl App {
             log::info!("[INSTALL PE STEP 1] 检查PE: {}", pe_info.display_name);
             send_step(&progress_tx, 1, &tr!("检查PE环境"), 50);
 
-            let (pe_exists, pe_path) =
-                crate::core::pe::PeManager::check_pe_exists(&pe_info.filename);
-            if !pe_exists {
-                log::info!("[INSTALL PE STEP 1] PE文件不存在，需要下载");
-                // 这里应该触发下载，但为了简化，我们直接返回错误
-                send_step(&progress_tx, 1, &tr!("检查PE环境"), 100);
-                return;
-            }
+            let pe_path = match require_verified_cached_pe(&pe_info) {
+                Ok(path) => path.to_string_lossy().into_owned(),
+                Err(error) => {
+                    log::error!("[INSTALL PE STEP 1] PE安全校验失败: {}", error);
+                    send_error(
+                        &progress_tx,
+                        &tr!("PE 文件安全校验失败，安装已停止：{}", error),
+                    );
+                    return;
+                }
+            };
 
-            log::info!("[INSTALL PE STEP 1] PE文件存在: {}", pe_path);
+            log::info!("[INSTALL PE STEP 1] PE文件可用: {}", pe_path);
             send_step(&progress_tx, 1, &tr!("检查PE环境"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 

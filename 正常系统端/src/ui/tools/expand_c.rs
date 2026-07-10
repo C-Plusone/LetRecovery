@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::core::install_config::{ConfigFileManager, ExpandConfig};
 use crate::core::quick_partition::{get_physical_disks, query_shrink_max};
 use crate::tr;
+use crate::ui::pe_preparation::{require_verified_cached_pe, PePreparationOutcome};
 
 /// 异步加载 C 盘信息的结果
 #[derive(Debug, Clone)]
@@ -432,22 +433,13 @@ impl App {
         });
 
         if let Some(pe) = pe_info {
-            let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
-            if !pe_exists {
-                // PE 不存在，先下载 PE，下载完成后继续扩容交接
-                log::info!("[EXPAND] PE文件不存在，开始下载: {}", pe.filename);
-                self.pending_download_url = Some(pe.download_url.clone());
-                self.pending_download_filename = Some(pe.filename.clone());
-                self.pending_pe_md5 = pe.md5.clone();
-                self.pending_pe_sha256 = pe.sha256.clone();
-                let pe_dir = crate::utils::path::get_pe_dir()
-                    .to_string_lossy()
-                    .to_string();
-                self.download_save_path = pe_dir;
-                self.pe_download_then_action = Some(crate::app::PeDownloadThenAction::Expand);
-                self.show_expand_c_dialog = false;
-                self.current_panel = crate::app::Panel::DownloadProgress;
-                return;
+            match self.prepare_pe_for_action(&pe, crate::app::PeDownloadThenAction::Expand) {
+                PePreparationOutcome::Present => {}
+                PePreparationOutcome::DownloadScheduled => {
+                    self.show_expand_c_dialog = false;
+                    return;
+                }
+                PePreparationOutcome::Rejected => return,
             }
         } else {
             self.expand_c_state.message = tr!("未选择 PE 环境，无法扩容");
@@ -491,12 +483,15 @@ impl App {
             }
         };
 
-        let (pe_exists, pe_path) = crate::core::pe::PeManager::check_pe_exists(&pe_info.filename);
-        if !pe_exists {
-            self.expand_c_state.executing = false;
-            self.expand_c_state.message = tr!("PE 文件不存在，无法扩容");
-            return;
-        }
+        let pe_path = match require_verified_cached_pe(&pe_info) {
+            Ok(path) => path.to_string_lossy().into_owned(),
+            Err(error) => {
+                log::error!("[EXPAND PE] PE安全校验失败: {}", error);
+                self.expand_c_state.executing = false;
+                self.expand_c_state.message = tr!("PE 文件安全校验失败，扩容已停止：{}", error);
+                return;
+            }
+        };
 
         // 扩容不格式化 C 盘，配置文件写到 C: 自身即可（C: 始终存在）
         let data_partition = "C:".to_string();

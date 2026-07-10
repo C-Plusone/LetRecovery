@@ -6,6 +6,7 @@ pub mod embedded_assets;
 pub mod hardware_info;
 pub mod install_progress;
 pub mod online_download;
+pub(crate) mod pe_preparation;
 pub mod system_backup;
 pub mod system_install;
 pub mod tools;

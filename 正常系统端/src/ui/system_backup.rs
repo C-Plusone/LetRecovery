@@ -6,6 +6,8 @@ use crate::app::{App, BackupFormat, BackupMode, Panel};
 use crate::core::dism::{Dism, DismProgress};
 use crate::core::install_config::{BackupConfig, ConfigFileManager};
 use crate::tr;
+use crate::ui::pe_preparation::require_verified_cached_pe;
+use crate::ui::pe_preparation::PePreparationOutcome;
 
 impl App {
     pub fn show_system_backup(&mut self, ui: &mut egui::Ui) {
@@ -512,20 +514,10 @@ impl App {
             });
 
             if let Some(pe) = pe_info {
-                let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
-                if !pe_exists {
-                    // PE不存在，先下载PE
-                    log::info!("[BACKUP] PE文件不存在，开始下载: {}", pe.filename);
-                    self.pending_download_url = Some(pe.download_url.clone());
-                    self.pending_download_filename = Some(pe.filename.clone());
-                    self.pending_pe_md5 = pe.md5.clone(); // 设置MD5校验值
-                    self.pending_pe_sha256 = pe.sha256.clone();
-                    let pe_dir = crate::utils::path::get_pe_dir()
-                        .to_string_lossy()
-                        .to_string();
-                    self.download_save_path = pe_dir;
-                    self.pe_download_then_action = Some(crate::app::PeDownloadThenAction::Backup);
-                    self.current_panel = crate::app::Panel::DownloadProgress;
+                if !matches!(
+                    self.prepare_pe_for_action(&pe, crate::app::PeDownloadThenAction::Backup),
+                    PePreparationOutcome::Present
+                ) {
                     return;
                 }
             }
@@ -713,15 +705,17 @@ impl App {
                 }
             };
 
-            let (pe_exists, pe_path) =
-                crate::core::pe::PeManager::check_pe_exists(&pe_info.filename);
-            if !pe_exists {
-                let _ = progress_tx.send(DismProgress {
-                    percentage: 0,
-                    status: format!("备份失败: PE文件不存在 {}", pe_info.filename),
-                });
-                return;
-            }
+            let pe_path = match require_verified_cached_pe(&pe_info) {
+                Ok(path) => path.to_string_lossy().into_owned(),
+                Err(error) => {
+                    log::error!("[BACKUP] PE安全校验失败: {}", error);
+                    let _ = progress_tx.send(DismProgress {
+                        percentage: 0,
+                        status: tr!("备份失败：PE 文件安全校验失败：{}", error),
+                    });
+                    return;
+                }
+            };
 
             // Step 2: 安装PE引导
             let _ = progress_tx.send(DismProgress {

@@ -5,6 +5,7 @@ use crate::app::{App, BootModeSelection, UnattendCheckResult};
 use crate::core::disk::{Partition, PartitionStyle};
 use crate::core::dism::ImageInfo;
 use crate::tr;
+use crate::ui::pe_preparation::PePreparationOutcome;
 use lr_core::boot_pca::BootPcaMode;
 
 /// ISO 挂载结果
@@ -1814,21 +1815,11 @@ impl App {
             });
 
             if let Some(pe) = pe_info {
-                let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
-                if !pe_exists {
-                    log::info!("[INSTALL] PE文件不存在，开始下载: {}", pe.filename);
-                    self.pending_download_url = Some(pe.download_url.clone());
-                    self.pending_download_filename = Some(pe.filename.clone());
-                    self.pending_pe_md5 = pe.md5.clone();
-                    self.pending_pe_sha256 = pe.sha256.clone();
-                    let pe_dir = crate::utils::path::get_pe_dir()
-                        .to_string_lossy()
-                        .to_string();
-                    self.download_save_path = pe_dir;
-                    self.pe_download_then_action = Some(crate::app::PeDownloadThenAction::Install);
-                    self.current_panel = crate::app::Panel::DownloadProgress;
-
-                    // 因为转到了下载页面，需要重置 is_installing
+                if !matches!(
+                    self.prepare_pe_for_action(&pe, crate::app::PeDownloadThenAction::Install),
+                    PePreparationOutcome::Present
+                ) {
+                    // 下载或校验错误都会中断当前启动尝试。
                     self.is_installing = false;
                     return;
                 }
