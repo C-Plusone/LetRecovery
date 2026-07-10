@@ -11,36 +11,6 @@ on:
         description: "Release 标签(留空=用当天日期,如 2026.6.17)"
         required: false
         default: ""
-      upload_onedrive_wim:
-        description: "测试用 rclone 上传生成后的 PE WIM 到世纪互联 OneDrive"
-        required: false
-        type: boolean
-        default: false
-      onedrive_remote_path:
-        description: "OneDrive target path under /CE-RAMOS"
-        required: false
-        default: ""
-      update_letrecovery_server:
-        description: "Update LetRecovery server pe.txt after WIM upload"
-        required: false
-        type: boolean
-        default: false
-      letrecovery_update_api:
-        description: "LetRecovery update.php URL"
-        required: false
-        default: "https://do.cloud-pe.cn"
-      letrecovery_pe_url:
-        description: "PE download URL written to LetRecovery pe.txt"
-        required: false
-        default: ""
-      letrecovery_pe_name:
-        description: "PE display name written to LetRecovery pe.txt"
-        required: false
-        default: "LetRecovery PE"
-      letrecovery_pe_filename:
-        description: "PE filename written to LetRecovery pe.txt"
-        required: false
-        default: "LetRecovery_PE.wim"
 
 permissions:
   contents: write
@@ -232,7 +202,9 @@ jobs:
           cat pkg/config.json
 
       - name: Upload PE WIM to 21Vianet OneDrive with rclone
-        if: ${{ inputs.upload_onedrive_wim == true }}
+        # Production releases always publish the new PE image. Test branches below
+        # are prereleases and must never replace the public PE image or metadata.
+        if: ${{ (inputs.branch || github.ref_name) == 'main' }}
         shell: pwsh
         env:
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
@@ -240,7 +212,7 @@ jobs:
           ONEDRIVE_TENANT_ID: ${{ secrets.ONEDRIVE_TENANT_ID }}
           ONEDRIVE_USER_EMAIL: ${{ secrets.ONEDRIVE_USER_EMAIL }}
           ONEDRIVE_REMOTE_ROOT: ${{ secrets.ONEDRIVE_REMOTE_ROOT }}
-          ONEDRIVE_REMOTE_PATH: ${{ inputs.onedrive_remote_path || secrets.ONEDRIVE_REMOTE_PATH }}
+          ONEDRIVE_REMOTE_PATH: ${{ secrets.ONEDRIVE_REMOTE_PATH }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -342,15 +314,15 @@ jobs:
           }
 
       - name: Update LetRecovery server PE config
-        if: ${{ inputs.upload_onedrive_wim == true && inputs.update_letrecovery_server == true }}
+        if: ${{ (inputs.branch || github.ref_name) == 'main' }}
         shell: pwsh
         env:
           UPDATE_API_SECRET: ${{ secrets.UPDATE_API_SECRET }}
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-          LETRECOVERY_UPDATE_API: ${{ inputs.letrecovery_update_api }}
-          LETRECOVERY_PE_URL: ${{ inputs.letrecovery_pe_url || secrets.LETRECOVERY_PE_URL }}
-          LETRECOVERY_PE_NAME: ${{ inputs.letrecovery_pe_name }}
-          LETRECOVERY_PE_FILENAME: ${{ inputs.letrecovery_pe_filename }}
+          LETRECOVERY_UPDATE_API: ${{ secrets.LETRECOVERY_UPDATE_API }}
+          LETRECOVERY_PE_URL: ${{ secrets.LETRECOVERY_PE_URL }}
+          LETRECOVERY_PE_NAME: LetRecovery PE
+          LETRECOVERY_PE_FILENAME: LetRecovery_PE.wim
         run: |
           $ErrorActionPreference = "Stop"
 
