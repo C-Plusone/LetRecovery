@@ -21,7 +21,7 @@ impl App {
         if let Some(ref remote_config) = self.remote_config {
             if !remote_config.loaded && !self.remote_config_loading {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("远程配置加载失败"),
                 );
                 if let Some(ref error) = remote_config.error {
@@ -106,7 +106,7 @@ impl App {
         {
             if !self.remote_config_loading {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("未找到在线系统镜像资源"),
                 );
                 ui.label(tr!("服务器可能暂时不可用，请稍后重试"));
@@ -274,7 +274,7 @@ impl App {
         if software_list.is_empty() {
             if !self.remote_config_loading {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("未找到在线软件资源"),
                 );
                 ui.label(tr!("服务器可能暂未提供软件列表，请稍后重试"));
@@ -707,7 +707,10 @@ impl App {
 
             if let Some(ref hw_info) = self.hardware_info {
                 if hw_info.gpus.is_empty() {
-                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), tr!("未检测到显卡"));
+                    ui.colored_label(
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
+                        tr!("未检测到显卡"),
+                    );
                 } else {
                     for (i, gpu) in hw_info.gpus.iter().enumerate() {
                         ui.horizontal(|ui| {
@@ -767,7 +770,7 @@ impl App {
         if gpu_driver_list.is_empty() {
             if !self.remote_config_loading {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("未找到在线显卡驱动资源"),
                 );
                 ui.label(tr!("服务器可能暂未提供显卡驱动列表，请稍后重试"));

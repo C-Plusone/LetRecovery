@@ -93,7 +93,7 @@ impl App {
                                         }
                                         crate::core::bitlocker::VolumeStatus::Encrypting
                                         | crate::core::bitlocker::VolumeStatus::Decrypting => {
-                                            egui::Color32::YELLOW
+                                            crate::ui::activity_text_color(ui.visuals().dark_mode)
                                         }
                                         _ => ui.visuals().text_color(),
                                     };
@@ -159,7 +159,7 @@ impl App {
                         }
                         BackupFormat::Gho => {
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("需要Ghost工具支持"),
                             );
                         }
@@ -268,7 +268,7 @@ impl App {
                     }
 
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("备份当前系统分区需要先重启到PE环境"),
                     );
                 }
@@ -358,17 +358,17 @@ impl App {
                     ui.add_space(10.0);
                     if self.backup_source_partition.is_none() {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("请选择要备份的分区"),
                         );
                     } else if self.backup_save_path.is_empty() {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("请选择保存位置"),
                         );
                     } else if self.backup_name.is_empty() {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("请输入备份名称"),
                         );
                     }
@@ -380,7 +380,7 @@ impl App {
                         if !partition.has_windows {
                             ui.add_space(5.0);
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("所选分区似乎没有 Windows 系统"),
                             );
                         }

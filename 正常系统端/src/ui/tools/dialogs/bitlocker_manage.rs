@@ -44,7 +44,7 @@ impl App {
                     });
                 } else if self.bitlocker_manage_partitions.is_empty() {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("未检测到 BitLocker 加密分区"),
                     );
                 } else {
@@ -81,7 +81,7 @@ impl App {
                                             VolumeStatus::EncryptedLocked => egui::Color32::from_rgb(255, 100, 100),
                                             VolumeStatus::EncryptedUnlocked => egui::Color32::from_rgb(100, 200, 100),
                                             VolumeStatus::Decrypting | VolumeStatus::Encrypting => {
-                                                egui::Color32::from_rgb(100, 150, 255)
+                                                crate::ui::activity_text_color(ui.visuals().dark_mode)
                                             }
                                             _ => egui::Color32::GRAY,
                                         };
@@ -155,21 +155,21 @@ impl App {
                                 tr!("该分区已解锁，可彻底关闭 BitLocker（解密）"),
                             );
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("解密在后台进行，可能耗时较长，期间请勿断电或重启。"),
                             );
                         }
                         Some(VolumeStatus::Decrypting) => {
                             ui.add_space(5.0);
                             ui.colored_label(
-                                egui::Color32::from_rgb(100, 150, 255),
+                                crate::ui::activity_text_color(ui.visuals().dark_mode),
                                 tr!("该分区正在解密中，请等待完成。"),
                             );
                         }
                         Some(VolumeStatus::Encrypting) => {
                             ui.add_space(5.0);
                             ui.colored_label(
-                                egui::Color32::from_rgb(100, 150, 255),
+                                crate::ui::activity_text_color(ui.visuals().dark_mode),
                                 tr!("该分区正在加密中。"),
                             );
                         }
@@ -192,7 +192,7 @@ impl App {
                     ui.add_space(8.0);
                     ui.separator();
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("恢复密钥（48 位数字），请妥善保管、勿泄露："),
                     );
                     ui.monospace(key.as_str());

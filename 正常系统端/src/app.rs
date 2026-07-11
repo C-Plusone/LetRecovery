@@ -1652,7 +1652,7 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(10.0);
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "");
+                        ui.colored_label(crate::ui::warning_text_color(ui.visuals().dark_mode), "");
                         ui.add_space(10.0);
                     });
 
@@ -1763,7 +1763,7 @@ impl eframe::App for App {
 
                     if is_busy {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("操作进行中...").to_string(),
                         );
                         ui.add_space(5.0);

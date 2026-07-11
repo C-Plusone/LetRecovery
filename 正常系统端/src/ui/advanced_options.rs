@@ -1561,7 +1561,7 @@ Write-Host "UWP应用清理完成"
                 ui.separator();
 
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("以下选项仅适用于 Windows 7 x64 安装"),
                 );
                 ui.add_space(5.0);
@@ -1576,14 +1576,14 @@ Write-Host "UWP应用清理完成"
                             self.win7_usb3_driver_path = dir.to_string_lossy().to_string();
                             if !dir.exists() {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 165, 0),
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                                     tr!("未找到该驱动目录，将跳过 USB3 驱动注入"),
                                 );
                             }
                         } else {
                             self.win7_usb3_driver_path.clear();
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("无法获取程序运行目录，将跳过 USB3 驱动注入"),
                             );
                         }
@@ -1605,14 +1605,14 @@ Write-Host "UWP应用清理完成"
                             self.win7_nvme_driver_path = dir.to_string_lossy().to_string();
                             if !dir.exists() {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 165, 0),
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                                     tr!("未找到该驱动目录，将跳过 NVMe 驱动注入"),
                                 );
                             }
                         } else {
                             self.win7_nvme_driver_path.clear();
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("无法获取程序运行目录，将跳过 NVMe 驱动注入"),
                             );
                         }
@@ -1676,7 +1676,7 @@ Write-Host "UWP应用清理完成"
                         if !dir.exists() {
                             ui.add_space(3.0);
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("未找到 UefiSeven 文件，请将 UefiSeven 文件放置在程序目录的 uefiseven 文件夹中"),
                             );
                         }
@@ -1695,7 +1695,7 @@ Write-Host "UWP应用清理完成"
                 ui.separator();
 
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("以下选项仅适用于 Windows XP/2003 x64 安装（需使用 UEFI 化的 XP 映像）"),
                 );
                 ui.add_space(5.0);
@@ -1709,7 +1709,7 @@ Write-Host "UWP应用清理完成"
                         if let Some(dir) = &usb3_dir {
                             if !dir.exists() {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 165, 0),
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                                     tr!("未找到 bin\\drivers\\xp\\usb3，将跳过 USB3 驱动注入"),
                                 );
                             }
@@ -1731,7 +1731,7 @@ Write-Host "UWP应用清理完成"
                         if let Some(dir) = &nvme_dir {
                             if !dir.exists() {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 165, 0),
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                                     tr!("未找到 bin\\drivers\\xp\\nvme，将跳过 NVMe 驱动注入"),
                                 );
                             }
@@ -1756,7 +1756,7 @@ Write-Host "UWP应用清理完成"
                     let ahci_missing = ahci_dir.as_ref().map(|d| !d.exists()).unwrap_or(true);
                     if ahci_missing {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("未找到 bin\\drivers\\xp\\ahci，AHCI 注入将被跳过"),
                         );
                     } else {
@@ -1827,7 +1827,7 @@ Write-Host "UWP应用清理完成"
                 if self.migrate_wifi {
                     if self.wifi_ssid.is_empty() {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("  未检测到当前 WiFi（请确认已连 WiFi 且以管理员运行）"),
                         );
                     } else {

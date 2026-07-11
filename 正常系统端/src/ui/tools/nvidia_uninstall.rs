@@ -77,7 +77,10 @@ impl App {
                             }
 
                             if summary.gpu_devices.is_empty() {
-                                ui.colored_label(egui::Color32::YELLOW, tr!("未检测到显卡设备"));
+                                ui.colored_label(
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
+                                    tr!("未检测到显卡设备"),
+                                );
                             }
 
                             // 分隔线
@@ -219,7 +222,7 @@ impl App {
                         // 如果没有检测到英伟达设备，显示警告但仍允许操作（可能是离线系统）
                         if !has_nvidia && !is_pe {
                             ui.colored_label(
-                                egui::Color32::YELLOW,
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("当前系统未检测到英伟达显卡"),
                             );
                             ui.add_space(10.0);

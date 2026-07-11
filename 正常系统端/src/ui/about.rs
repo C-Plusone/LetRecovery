@@ -117,7 +117,7 @@ impl App {
 
                     if is_pe {
                         ui.colored_label(
-                            egui::Color32::from_rgb(255, 165, 0),
+                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                             tr!("(PE环境下不可用)"),
                         );
                     }

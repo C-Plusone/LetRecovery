@@ -97,7 +97,7 @@ impl App {
                     if result.is_valid {
                         if result.has_password {
                             ui.colored_label(
-                                egui::Color32::from_rgb(255, 165, 0),
+                                crate::ui::warning_text_color(ui.visuals().dark_mode),
                                 tr!("已设置密码保护"),
                             );
 
@@ -124,7 +124,10 @@ impl App {
                                 });
                             } else if !result.message.is_empty() {
                                 ui.add_space(5.0);
-                                ui.colored_label(egui::Color32::YELLOW, result.message.to_string());
+                                ui.colored_label(
+                                    crate::ui::warning_text_color(ui.visuals().dark_mode),
+                                    result.message.to_string(),
+                                );
                             }
                         } else {
                             ui.colored_label(

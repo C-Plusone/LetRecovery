@@ -63,7 +63,7 @@ impl App {
 
         if systems.is_empty() {
             ui.colored_label(
-                egui::Color32::from_rgb(255, 165, 0),
+                crate::ui::warning_text_color(ui.visuals().dark_mode),
                 tr!("暂无可用的系统镜像"),
             );
             return;

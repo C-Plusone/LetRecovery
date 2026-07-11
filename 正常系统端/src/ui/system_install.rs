@@ -139,7 +139,7 @@ impl App {
 
             if volumes_to_show.is_empty() {
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("该镜像中没有可用的系统版本"),
                 );
             } else {
@@ -155,7 +155,7 @@ impl App {
                 // 如果显示的是原始列表，显示提示
                 if use_original {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("未检测到标准系统镜像，显示所有分卷"),
                     );
                 }
@@ -251,7 +251,9 @@ impl App {
                                 crate::core::bitlocker::VolumeStatus::EncryptedLocked => egui::Color32::RED,
                                 crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => egui::Color32::from_rgb(102, 187, 106),
                                 crate::core::bitlocker::VolumeStatus::Encrypting |
-                                crate::core::bitlocker::VolumeStatus::Decrypting => egui::Color32::YELLOW,
+                                crate::core::bitlocker::VolumeStatus::Decrypting => {
+                                    crate::ui::activity_text_color(ui.visuals().dark_mode)
+                                }
                                 _ => ui.visuals().text_color(),
                             };
                             ui.colored_label(status_color, tr!(partition.bitlocker_status.as_str()));
@@ -573,7 +575,7 @@ impl App {
             }
 
             ui.colored_label(
-                egui::Color32::from_rgb(255, 165, 0),
+                crate::ui::warning_text_color(ui.visuals().dark_mode),
                 tr!("安装到当前系统分区需要先重启到PE环境"),
             );
         }
@@ -640,7 +642,7 @@ impl App {
                 if partition.has_windows && !self.format_partition {
                     ui.add_space(5.0);
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("目标分区已有系统，建议勾选\"格式化分区\""),
                     );
                 }
@@ -886,7 +888,7 @@ impl App {
             && self.boot_pca_detection_error.is_some();
         if esp_will_be_created_by_script {
             ui.colored_label(
-                egui::Color32::from_rgb(255, 165, 0),
+                crate::ui::warning_text_color(ui.visuals().dark_mode),
                 tr!("当前未检测到同盘 ESP；Diskpart 脚本必须在安装前创建 ESP。"),
             );
         } else if let Some(error) = self.boot_pca_selection_error() {
@@ -898,7 +900,7 @@ impl App {
             );
         } else if self.selected_boot_pca_mode == BootPcaMode::Pca2011 {
             ui.colored_label(
-                egui::Color32::from_rgb(255, 165, 0),
+                crate::ui::warning_text_color(ui.visuals().dark_mode),
                 tr!("兼容仅信任 PCA2011 的旧设备；已撤销 PCA2011 的设备无法使用。"),
             );
         }

@@ -269,7 +269,7 @@ impl App {
                                         if self.pe_download_then_action.is_some() =>
                                     {
                                         ui.colored_label(
-                                            egui::Color32::from_rgb(255, 165, 0),
+                                            crate::ui::warning_text_color(ui.visuals().dark_mode),
                                             tr!("未提供文件校验值，已跳过完整性校验"),
                                         );
                                     }

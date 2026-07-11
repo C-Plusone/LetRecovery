@@ -31,7 +31,7 @@ impl App {
                     });
                 } else if windows_partitions.is_empty() {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("未找到包含 Windows 系统的分区"),
                     );
                 } else {

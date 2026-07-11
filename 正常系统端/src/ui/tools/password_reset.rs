@@ -41,7 +41,7 @@ impl App {
             .show(ui.ctx(), |ui| {
                 ui.label(tr!("清除 Windows 本地账户的密码（等效空密码），并启用被禁用的账户。"));
                 ui.colored_label(
-                    egui::Color32::from_rgb(255, 165, 0),
+                    crate::ui::warning_text_color(ui.visuals().dark_mode),
                     tr!("仅用于自己的系统/已授权场景。离线系统会修改其 SAM（操作前自动备份）；当前系统走 net 命令。"),
                 );
                 ui.add_space(10.0);
@@ -107,7 +107,7 @@ impl App {
                     });
                 } else {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
+                        crate::ui::warning_text_color(ui.visuals().dark_mode),
                         tr!("未检测到可用的离线 Windows 系统。"),
                     );
                 }

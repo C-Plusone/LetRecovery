@@ -119,7 +119,7 @@ impl App {
                     let color = if is_completed {
                         egui::Color32::from_rgb(102, 187, 106)
                     } else if is_current {
-                        egui::Color32::from_rgb(255, 165, 0)
+                        crate::ui::warning_text_color(ui.visuals().dark_mode)
                     } else {
                         egui::Color32::GRAY
                     };

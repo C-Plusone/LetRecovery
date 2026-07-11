@@ -67,9 +67,9 @@ impl App {
                                     };
 
                                     let label = if is_current {
-                                        egui::RichText::new(&partition.letter)
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(100, 150, 255))
+                                        egui::RichText::new(&partition.letter).strong().color(
+                                            crate::ui::activity_text_color(ui.visuals().dark_mode),
+                                        )
                                     } else {
                                         egui::RichText::new(&partition.letter)
                                     };
