@@ -27,6 +27,8 @@ export interface DocPageData {
   html: string
   /** 原始 markdown 正文（去掉 frontmatter），用于"复制 Markdown" */
   raw: string
+  /** 构建期从可见 Markdown token 提取的正文搜索文本 */
+  searchText: string
   frontmatter: DocFrontmatter
   headings: Heading[]
 }
@@ -34,6 +36,7 @@ export interface DocPageData {
 interface MarkdownModule {
   html: string
   raw: string
+  searchText: string
   frontmatter: DocFrontmatter
   headings: Heading[]
 }
@@ -64,6 +67,7 @@ for (const [file, mod] of Object.entries(modules)) {
     file,
     html: mod.html,
     raw: mod.raw ?? '',
+    searchText: mod.searchText ?? '',
     frontmatter: mod.frontmatter ?? {},
     headings: mod.headings ?? [],
   }

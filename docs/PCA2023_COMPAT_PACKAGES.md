@@ -20,6 +20,8 @@ pca2023-modern-amd64.wim
 
 资源族不是任意跨版本复制。每次更换资源源版本时，必须重新完成本文末尾的虚拟机支持矩阵验证；没有验证记录不能扩大代码中的版本范围。
 
+当前正式资源的源文件、长度、SHA-256、BootEx 文件版本和最终 WIM 哈希记录在 [`PCA2023_RESOURCES.lock.json`](PCA2023_RESOURCES.lock.json)。发布 CI 会按该清单复核底包，避免同名旧文件或未经审查的资源进入 release。当前 Win10 x64/x86 资源来自微软更新目录 KB5087544，现代 x64 资源来自微软 Windows 11 25H2 简体中文 v2 官方 ISO。
+
 ## WIM 白名单布局
 
 每份资源 WIM 的卷索引固定为 `1`，只允许包含安装后需要写入离线 Windows 的以下路径：
@@ -48,6 +50,17 @@ pwsh .github/scripts/build-pca2023-pack.ps1 `
 ```
 
 脚本只挂载源 WIM 为只读，从固定白名单复制资源，验证微软签名和架构，再捕获最小 WIM。它不格式化、分区或修改真实磁盘。正式构建从 `letrecovery-package` 底包取得三份 WIM；缺少任一文件时 release 会停止，并将同一套资源同时放入桌面端和 PE WIM。
+
+如果已经从微软介质或动态更新包得到仅含白名单资源的普通目录，可以使用项目内置 wimlib 打包，不需要挂载 WIM 或调用 DISM：
+
+```powershell
+cargo run -p lr-core --example build_pca2023_resource_pack --locked -- `
+  C:\Payload\pca2023-legacy-amd64 `
+  C:\Output\pca2023-legacy-amd64.wim `
+  amd64
+```
+
+该工具要求完整的 16 个有效 SFNT BootEx 字体，拒绝符号链接和白名单外文件，验证 `bootmgfw_EX.efi` 的 PCA2023 签名、`bootmgr_EX.efi` 的微软签名及两者的 PE 架构。`boot.stl` 使用不同于 EFI PE 的签名提供程序，制作阶段必须另以 `Get-AuthenticodeSignature` 验证并把 SHA-256 写入资源锁；打包器只接受不超过 64 KiB 的普通文件。生成后工具会重新打开 WIM 并走客户端相同的包校验逻辑；已有输出默认不会覆盖，只有显式传入 `--force` 才会替换。
 
 ## BCDBoot 部署
 

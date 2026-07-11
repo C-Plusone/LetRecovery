@@ -265,10 +265,9 @@ pub fn prepare_from_local_assets(
     }
     let selection = select_offline_asset(target)?;
     let package_path = asset_directory.join(selection.file_name);
-    validate_local_package_file(&package_path)?;
+    validate_offline_asset_package(&package_path, target.architecture)?;
     let sha256 = sha256_file(&package_path, |_| {})
         .map_err(|error| PcaCompatError::Io(error.to_string()))?;
-    validate_package_wim(&package_path, PACKAGE_IMAGE_INDEX, target.architecture)?;
 
     Ok(PreparedPcaCompatPackage {
         path: package_path,
@@ -277,6 +276,18 @@ pub fn prepare_from_local_assets(
         target,
         family: selection.family,
     })
+}
+
+/// Validate a PCA2023 resource WIM without applying it to a Windows image.
+///
+/// `target_architecture` uses WIM XML values (`0` for x86 and `9` for amd64),
+/// not PE COFF machine constants.
+pub fn validate_offline_asset_package(
+    package_path: &Path,
+    target_architecture: u16,
+) -> Result<(), PcaCompatError> {
+    validate_local_package_file(package_path)?;
+    validate_package_wim(package_path, PACKAGE_IMAGE_INDEX, target_architecture)
 }
 
 pub fn open_staged_package(

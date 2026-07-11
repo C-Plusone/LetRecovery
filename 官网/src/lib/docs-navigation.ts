@@ -20,6 +20,7 @@ const sidebarZh: SidebarItem[] = [
     text: '核心功能',
     items: [
       { text: '系统安装', link: '/docs/guide/system-install' },
+      { text: 'Secure Boot 与 PCA', link: '/docs/guide/secure-boot-pca' },
       { text: '简易模式', link: '/docs/guide/easy-mode' },
       { text: '系统备份', link: '/docs/guide/system-backup' },
       { text: '在线下载', link: '/docs/guide/online-download' },
@@ -63,6 +64,7 @@ const sidebarEn: SidebarItem[] = [
     text: 'Core Features',
     items: [
       { text: 'System Installation', link: '/docs/guide/system-install' },
+      { text: 'Secure Boot and PCA', link: '/docs/guide/secure-boot-pca' },
       { text: 'Easy Mode', link: '/docs/guide/easy-mode' },
       { text: 'System Backup', link: '/docs/guide/system-backup' },
       { text: 'Online Download', link: '/docs/guide/online-download' },

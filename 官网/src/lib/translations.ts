@@ -78,6 +78,7 @@ export interface Dict {
     onThisPage: string
     notFound: string
     notFoundDesc: string
+    backToDocs: string
     searchLabel: string
     searchPlaceholder: string
     searchEmpty: string
@@ -175,6 +176,7 @@ const zh: Dict = {
     onThisPage: '本页大纲',
     notFound: '页面不存在',
     notFoundDesc: '没有找到这篇文档，请从左侧目录重新选择。',
+    backToDocs: '返回文档首页',
     searchLabel: '搜索文档',
     searchPlaceholder: '搜索文档…',
     searchEmpty: '没有找到相关内容',
@@ -273,6 +275,7 @@ const en: Dict = {
     onThisPage: 'On this page',
     notFound: 'Page not found',
     notFoundDesc: 'This document could not be found. Please pick another from the menu.',
+    backToDocs: 'Back to documentation',
     searchLabel: 'Search docs',
     searchPlaceholder: 'Search documentation…',
     searchEmpty: 'No results found.',

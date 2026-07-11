@@ -84,6 +84,6 @@ The bundled genahci/stornvme are **x64** and only work for 64-bit XP/2003. **32-
 - You have an **original install disc** and the target machine is traditional SATA/BIOS → use **Path 1 (i386 text-mode)**.
 - The target machine is **modern NVMe / you want UEFI boot** → **Path 2 (UEFI-enabled XP x64 image)** is more convenient.
 
-::: tip Real-hardware regression
-The XP/2003 install chain depends on a real reinstall environment, so we recommend regression testing on a VM/real machine first. When reporting issues, please attach the `[XP-UEFI]`, `[XP-DRV]`, `[TXTDRV]` sections from the log.
+::: tip Reporting Issues
+If you encounter problems during the XP/2003 installation, please include the `[XP-UEFI]`, `[XP-DRV]`, `[TXTDRV]`, and similar sections from the log when reporting the issue.
 :::

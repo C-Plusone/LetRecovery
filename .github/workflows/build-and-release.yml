@@ -109,21 +109,43 @@ jobs:
           echo "运行时垃圾清理完成。"
 
       - name: Validate bundled PCA2023 offline assets
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          asset_dir="pkg/bin/pca2023"
-          required=(
-            "pca2023-legacy-amd64.wim"
-            "pca2023-windows10-x86.wim"
+          $ErrorActionPreference = "Stop"
+          $assetDir = "pkg\bin\pca2023"
+          $lockFile = "docs\PCA2023_RESOURCES.lock.json"
+          $required = @(
+            "pca2023-legacy-amd64.wim",
+            "pca2023-windows10-x86.wim",
             "pca2023-modern-amd64.wim"
           )
-          for name in "${required[@]}"; do
-            test -f "$asset_dir/$name" || {
-              echo "底包缺少 PCA2023 离线资源: $asset_dir/$name"
-              exit 1
+          if (-not (Test-Path -LiteralPath $lockFile -PathType Leaf)) {
+            throw "缺少 PCA2023 资源锁定清单: $lockFile"
+          }
+          $manifest = Get-Content -LiteralPath $lockFile -Raw -Encoding UTF8 | ConvertFrom-Json
+          $lockedNames = @($manifest.packages | ForEach-Object { [string]$_.file })
+          if (@(Compare-Object $required $lockedNames).Count -ne 0) {
+            throw "PCA2023 资源锁定清单与固定资源集合不一致"
+          }
+          foreach ($package in $manifest.packages) {
+            $name = [string]$package.file
+            if ([IO.Path]::GetFileName($name) -ne $name) {
+              throw "PCA2023 资源锁定清单包含非法文件名: $name"
             }
-          done
+            $path = Join-Path $assetDir $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "底包缺少 PCA2023 离线资源: $path"
+            }
+            $item = Get-Item -LiteralPath $path
+            if ($item.Length -ne [int64]$package.size) {
+              throw "PCA2023 资源大小不匹配: $name ($($item.Length) != $($package.size))"
+            }
+            $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne [string]$package.sha256) {
+              throw "PCA2023 资源 SHA-256 不匹配: $name"
+            }
+            Write-Host "Validated PCA2023 resource: $name"
+          }
 
       - name: Relocate system-side lang/diskpart into bin
         shell: bash

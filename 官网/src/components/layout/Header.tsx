@@ -227,11 +227,23 @@ const Header: React.FC = () => {
             aria-hidden="true"
           />
 
-          {isDocs && (
-            <Suspense fallback={<div className="size-9" aria-hidden="true" />}>
-              <DocsSearch active />
-            </Suspense>
-          )}
+          {/* 始终保留 lazy 边界：组件加载后会以 active=false 常驻，进入文档页时
+              才能从宽度 0 平滑展开；不能再改回 isDocs 条件挂载。 */}
+          <Suspense
+            fallback={
+              <div
+                aria-hidden="true"
+                className={cn(
+                  'overflow-hidden transition-all duration-300 ease-out',
+                  isDocs
+                    ? 'w-9 opacity-100 md:w-40 lg:w-56'
+                    : 'w-0 opacity-0',
+                )}
+              />
+            }
+          >
+            <DocsSearch active={isDocs} />
+          </Suspense>
           {githubButton}
           {languageMenu}
           {themeMenu}

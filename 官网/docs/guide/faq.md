@@ -25,6 +25,10 @@ description: 关于 LetRecovery 的常见问题。
 
 镜像格式：WIM、ESD、SWM、GHO、ISO，以及原版 XP/2003 的 i386 文本安装介质。可安装的目标系统涵盖 Windows **XP / 2003 / 7 / 8 / 10 / 11**。
 
+## PCA2011 和 PCA2023 应该选哪个？
+
+通常保持**自动**。LetRecovery 会在格式化前检查固件信任、Secure Boot、ESP 和镜像内的 EFI 签名；旧的现代 Windows 镜像缺少 BootEx 时，可使用随包的离线兼容资源。Windows 7/8.1 不会显示此选项，UefiSeven 也不能把 Windows 7 升级为 PCA2023。详见 [Secure Boot 与 PCA2011 / PCA2023](/guide/secure-boot-pca)。
+
 ## 运行需要什么配置？真要 4 GB 内存吗？
 
 运行桌面端需 Windows 10/11（64 位）+ 管理员权限。建议至少 4 GB 可用内存，但这只是**建议**——程序**不会**强制检测内存。

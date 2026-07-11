@@ -157,6 +157,34 @@ function extractHeadings(md: MarkdownIt, content: string): Heading[] {
   return headings
 }
 
+/** Build a compact visible-text index from parsed Markdown tokens. This keeps
+ * Markdown punctuation and raw HTML out of search while retaining prose,
+ * headings, link labels, image alt text, inline code, and fenced commands. */
+function extractSearchText(md: MarkdownIt, content: string): string {
+  const tokens = md.parse(content, {})
+  const fragments: string[] = []
+
+  for (const token of tokens) {
+    if (token.type === 'inline' && token.children) {
+      for (const child of token.children) {
+        if (
+          child.type === 'text' ||
+          child.type === 'code_inline' ||
+          child.type === 'image'
+        ) {
+          fragments.push(child.content)
+        } else if (child.type === 'softbreak' || child.type === 'hardbreak') {
+          fragments.push(' ')
+        }
+      }
+    } else if (token.type === 'fence' || token.type === 'code_block') {
+      fragments.push(token.content)
+    }
+  }
+
+  return fragments.join(' ').replace(/\s+/g, ' ').trim()
+}
+
 const TICK_CHECK =
   '<svg class="cosspress-tick cosspress-tick-yes" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-label="yes"><path d="M20 6 9 17l-5-5"/></svg>'
 const TICK_CROSS =
@@ -230,12 +258,14 @@ export function cosspressMarkdown(): Plugin {
       currentLocale = id.replace(/\\/g, '/').includes('/docs/en/') ? 'en' : 'zh'
       const html = replaceBadges(replaceTicks(wrapCodeBlocks(md.render(content))))
       const headings = extractHeadings(md, content)
+      const searchText = extractSearchText(md, content)
       return {
         code: [
           `export const html = ${JSON.stringify(html)};`,
           `export const raw = ${JSON.stringify(content)};`,
           `export const frontmatter = ${JSON.stringify(frontmatter)};`,
           `export const headings = ${JSON.stringify(headings)};`,
+          `export const searchText = ${JSON.stringify(searchText)};`,
           `export default frontmatter;`,
         ].join('\n'),
         map: null,
