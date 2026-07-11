@@ -284,6 +284,17 @@ pub fn resolve_pca_mode(
         });
     }
 
+    if firmware.secure_boot_enabled == Some(true)
+        && firmware.trusts_pca2023 == Some(true)
+        && assessment.sources.supports(PcaGeneration::Pca2023)
+    {
+        ensure_compatible(PcaGeneration::Pca2023)?;
+        return Ok(BootPcaDecision {
+            generation: PcaGeneration::Pca2023,
+            reason: "安全启动已开启且固件信任 PCA2023",
+        });
+    }
+
     if assessment.existing_esp != PcaGeneration::Unknown
         && ensure_compatible(assessment.existing_esp).is_ok()
     {
@@ -1338,8 +1349,17 @@ mod tests {
     }
 
     #[test]
-    fn auto_preserves_compatible_existing_esp() {
+    fn auto_prefers_2023_when_secure_boot_firmware_trusts_both_generations() {
         let result = resolve_pca_mode(BootPcaMode::Auto, &assessment()).unwrap();
+        assert_eq!(result.generation, PcaGeneration::Pca2023);
+        assert_eq!(result.reason, "安全启动已开启且固件信任 PCA2023");
+    }
+
+    #[test]
+    fn auto_preserves_compatible_existing_esp_when_secure_boot_is_disabled() {
+        let mut input = assessment();
+        input.firmware.secure_boot_enabled = Some(false);
+        let result = resolve_pca_mode(BootPcaMode::Auto, &input).unwrap();
         assert_eq!(result.generation, PcaGeneration::Pca2011);
     }
 

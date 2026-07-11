@@ -33,7 +33,7 @@ English | [简体中文](README.md)
 
 ### 🌐 Online Download
 - **System images / common software** - Fetched online, accelerated by multi-threaded Aria2
-- **PE integrity verification** - New metadata prefers SHA-256 while preserving legacy MD5 compatibility; a declared checksum fails closed on mismatch or calculation error
+- **PE integrity and customization** - Online downloads prefer SHA-256 while preserving legacy MD5 compatibility; packaged files in `bin/pe` remain user-customizable and are not blocked by remote hashes after local modification
 
 ### 🔧 Advanced Options
 - Format partition, boot repair (UEFI / Legacy)

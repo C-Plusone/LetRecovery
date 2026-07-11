@@ -1,7 +1,7 @@
 use crate::tr;
 use crate::utils::cmd::create_command;
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lr_core::cached_artifact::{
     inspect_cached_artifact, verify_cached_artifact, CachedArtifactError, CachedArtifactPresence,
@@ -9,7 +9,7 @@ use lr_core::cached_artifact::{
 };
 
 use crate::utils::encoding::gbk_to_utf8;
-use crate::utils::path::{get_bin_dir, get_exe_dir};
+use crate::utils::path::{get_bin_dir, get_exe_dir, get_pe_download_cache_dir};
 
 /// WinPE 启动管理器
 pub struct PeManager {
@@ -26,40 +26,60 @@ impl PeManager {
         }
     }
 
-    fn cache_directories() -> Vec<std::path::PathBuf> {
+    fn user_managed_directories() -> Vec<PathBuf> {
         let exe_dir = get_exe_dir();
-        let mut directories = vec![
+        vec![
             get_bin_dir().join("pe"),
             exe_dir.clone(),
             exe_dir.join("PE"),
             exe_dir.join("pe"),
-        ];
+        ]
+    }
+
+    fn managed_cache_directories() -> Vec<PathBuf> {
+        let mut directories = vec![get_pe_download_cache_dir()];
         if let Some(download_dir) = dirs::download_dir() {
             directories.push(download_dir);
         }
         directories
     }
 
-    /// Validate PE metadata and locate a regular cache file without hashing it.
-    /// Full verification is performed in the worker immediately before use.
+    /// Locate a user-managed local PE or a managed downloaded PE.
+    ///
+    /// Files shipped in `bin/pe` intentionally remain customizable and are
+    /// constrained to regular files without enforcing server metadata. Files
+    /// from the managed download cache retain strict checksum verification.
     pub fn find_cached_pe(
         filename: &str,
         sha256: Option<&str>,
         md5: Option<&str>,
     ) -> std::result::Result<CachedArtifactPresence, CachedArtifactError> {
-        inspect_cached_artifact(filename, &Self::cache_directories(), sha256, md5)
+        inspect_pe_candidates(
+            filename,
+            &Self::user_managed_directories(),
+            &Self::managed_cache_directories(),
+            sha256,
+            md5,
+        )
     }
 
     /// 查找并校验缓存的 PE 文件。
     ///
-    /// 文件名来自服务器配置，因此在拼接路径前必须先通过单文件名校验；
-    /// SHA-256 优先于兼容字段 MD5。声明过的校验值无法验证时会失败关闭。
+    /// 文件名来自服务器配置，因此在拼接路径前必须先通过单文件名校验。
+    /// 用户管理目录中的 PE 允许自定义；联网下载缓存则 SHA-256 优先于兼容字段 MD5，
+    /// 声明过的校验值无法验证时会失败关闭。
     pub fn check_cached_pe(
         filename: &str,
         sha256: Option<&str>,
         md5: Option<&str>,
     ) -> std::result::Result<CachedArtifactStatus, CachedArtifactError> {
-        verify_cached_artifact(filename, &Self::cache_directories(), sha256, md5)
+        verify_pe_candidates(
+            filename,
+            &Self::user_managed_directories(),
+            &Self::managed_cache_directories(),
+            sha256,
+            md5,
+        )
     }
 
     /// 仅检查 PE 文件是否存在的兼容接口。
@@ -518,8 +538,118 @@ impl PeManager {
     }
 }
 
+fn inspect_pe_candidates(
+    filename: &str,
+    user_managed_directories: &[PathBuf],
+    managed_cache_directories: &[PathBuf],
+    sha256: Option<&str>,
+    md5: Option<&str>,
+) -> std::result::Result<CachedArtifactPresence, CachedArtifactError> {
+    match inspect_cached_artifact(filename, user_managed_directories, None, None)? {
+        present @ CachedArtifactPresence::Present { .. } => Ok(present),
+        CachedArtifactPresence::Missing => {
+            inspect_cached_artifact(filename, managed_cache_directories, sha256, md5)
+        }
+    }
+}
+
+fn verify_pe_candidates(
+    filename: &str,
+    user_managed_directories: &[PathBuf],
+    managed_cache_directories: &[PathBuf],
+    sha256: Option<&str>,
+    md5: Option<&str>,
+) -> std::result::Result<CachedArtifactStatus, CachedArtifactError> {
+    match verify_cached_artifact(filename, user_managed_directories, None, None)? {
+        ready @ CachedArtifactStatus::Ready { .. } => Ok(ready),
+        CachedArtifactStatus::Missing => {
+            verify_cached_artifact(filename, managed_cache_directories, sha256, md5)
+        }
+    }
+}
+
 impl Default for PeManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod cache_policy_tests {
+    use super::*;
+    use lr_core::cached_artifact::CachedArtifactVerification;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const WRONG_MD5: &str = "00000000000000000000000000000000";
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "letrecovery-pe-policy-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("create isolated test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn user_managed_pe_can_be_customized_without_matching_server_hash() {
+        let local = TestDirectory::new("local");
+        let managed = TestDirectory::new("managed-empty");
+        let path = local.0.join("LetRecovery_PE.wim");
+        fs::write(&path, b"custom PE contents").unwrap();
+
+        let status = verify_pe_candidates(
+            "LetRecovery_PE.wim",
+            std::slice::from_ref(&local.0),
+            std::slice::from_ref(&managed.0),
+            None,
+            Some(WRONG_MD5),
+        )
+        .unwrap();
+
+        assert_eq!(
+            status,
+            CachedArtifactStatus::Ready {
+                path,
+                verification: CachedArtifactVerification::NotProvided,
+            }
+        );
+    }
+
+    #[test]
+    fn managed_download_cache_still_fails_closed_on_hash_mismatch() {
+        let local = TestDirectory::new("local-empty");
+        let managed = TestDirectory::new("managed");
+        let path = managed.0.join("LetRecovery_PE.wim");
+        fs::write(&path, b"corrupted download").unwrap();
+
+        let error = verify_pe_candidates(
+            "LetRecovery_PE.wim",
+            std::slice::from_ref(&local.0),
+            std::slice::from_ref(&managed.0),
+            None,
+            Some(WRONG_MD5),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CachedArtifactError::HashMismatch { path: failed, .. } if failed == path
+        ));
     }
 }

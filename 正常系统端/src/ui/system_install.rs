@@ -939,6 +939,11 @@ impl App {
                     {
                         return tr!("不可用");
                     }
+                    if firmware.secure_boot_enabled == Some(true)
+                        && firmware.trusts_pca2023 == Some(true)
+                    {
+                        return "PCA2023".to_string();
+                    }
                     if Self::firmware_rejects_pca2011(firmware) {
                         return "PCA2023".to_string();
                     }

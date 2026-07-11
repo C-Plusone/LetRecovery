@@ -41,7 +41,7 @@ impl App {
                         path.display()
                     ),
                     None => log::warn!(
-                        "[PE] Cached PE has no declared checksum; continuing for legacy compatibility: {}",
+                        "[PE] Using a user-managed local PE or legacy cache without an enforced checksum: {}",
                         path.display()
                     ),
                 }
@@ -56,7 +56,7 @@ impl App {
                 self.pending_download_filename = Some(pe.filename.clone());
                 self.pending_pe_md5 = pe.md5.clone();
                 self.pending_pe_sha256 = pe.sha256.clone();
-                self.download_save_path = crate::utils::path::get_pe_dir()
+                self.download_save_path = crate::utils::path::get_pe_download_cache_dir()
                     .to_string_lossy()
                     .into_owned();
                 self.pe_download_then_action = Some(action);
