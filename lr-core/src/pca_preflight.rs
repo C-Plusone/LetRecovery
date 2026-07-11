@@ -295,6 +295,23 @@ struct ScopedTempDir {
 impl ScopedTempDir {
     fn create() -> Result<Self, String> {
         let base = std::env::temp_dir();
+        Self::create_in(&base)
+    }
+
+    fn create_in(base: &Path) -> Result<Self, String> {
+        fs::create_dir_all(base).map_err(|error| {
+            format!("创建 PCA 预检临时根目录失败 ({}): {error}", base.display())
+        })?;
+        let metadata = fs::symlink_metadata(base).map_err(|error| {
+            format!("检查 PCA 预检临时根目录失败 ({}): {error}", base.display())
+        })?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(format!(
+                "PCA 预检临时根路径不是安全的普通目录: {}",
+                base.display()
+            ));
+        }
+
         for _ in 0..MAX_TEMP_DIR_ATTEMPTS {
             let id = NEXT_TEMP_DIR_ID.fetch_add(1, Ordering::Relaxed);
             let path = base.join(format!(
@@ -532,5 +549,24 @@ mod tests {
             required_generation(BootPcaMode::Auto, &fw),
             Err(PcaPreflightError::Pca2023TrustUnknown)
         );
+    }
+
+    #[test]
+    fn preflight_temp_directory_creates_a_missing_parent_tree() {
+        let root = std::env::temp_dir().join(format!(
+            "letrecovery-pca-temp-parent-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_DIR_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let base = root.join("missing").join("temp");
+        assert!(!base.exists());
+
+        let directory = ScopedTempDir::create_in(&base).unwrap();
+        assert!(base.is_dir());
+        assert!(directory.path().is_dir());
+        assert_eq!(directory.path().parent(), Some(base.as_path()));
+
+        drop(directory);
+        fs::remove_dir_all(root).unwrap();
     }
 }
