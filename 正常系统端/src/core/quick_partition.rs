@@ -157,7 +157,7 @@ impl DiskPartitionInfo {
 }
 
 /// 用户设计的分区布局
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PartitionLayout {
     /// 分区大小（GB）
     pub size_gb: f64,
@@ -830,6 +830,16 @@ pub fn execute_quick_partition(
         };
     }
 
+    execute_quick_partition_validated(disk_number, partition_style, layouts)
+}
+
+/// Executes a plan whose physical-disk identity and current safety state were
+/// already revalidated by the caller immediately before this boundary.
+pub(crate) fn execute_quick_partition_validated(
+    disk_number: u32,
+    partition_style: PartitionStyle,
+    layouts: &[PartitionLayout],
+) -> QuickPartitionResult {
     // 构建 diskpart 脚本
     let mut script = String::new();
 

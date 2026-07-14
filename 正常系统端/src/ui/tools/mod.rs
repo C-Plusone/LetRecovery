@@ -40,9 +40,6 @@ use crate::tr;
 impl App {
     /// 显示工具箱页面
     pub fn show_tools(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("工具箱"));
-        ui.separator();
-
         let is_pe = self
             .system_info
             .as_ref()
@@ -55,8 +52,8 @@ impl App {
         // 工具按钮自适应换行：英文标签比中文宽，固定 4 列会被窗口右侧裁切，
         // 改用 horizontal_wrapped，按钮按可用宽度自动换行（中英文都不溢出）。
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(15.0, 12.0);
-            let button_size = egui::vec2(130.0, 50.0);
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            let button_size = egui::vec2(108.0, 26.0);
 
             // ========== 第一行 ==========
             if ui

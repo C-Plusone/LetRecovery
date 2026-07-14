@@ -47,6 +47,7 @@ export interface Dict {
     cardTitle: string
     version: string
     license: string
+    additionalTerms: string
     copyright: string
     source: string
     ackTitle: string
@@ -109,7 +110,7 @@ const zh: Dict = {
   home: {
     heroTitleLines: ['一款纯净的', '系统重装工具'],
     heroDesc:
-      '采用 Rust + egui 精心打造，拥有极致的运行效率，零广告零捆绑的纯净体验，简洁直观的操作界面让电脑小白也能轻松上手。',
+      '采用 Rust 与原生 Windows 控件精心打造，拥有极致的运行效率，零广告零捆绑的纯净体验，简洁直观的操作界面让电脑小白也能轻松上手。',
     download: '立即下载',
     joinCommunity: '加入社区',
     screenshotAlt: 'LetRecovery 界面预览',
@@ -141,6 +142,7 @@ const zh: Dict = {
     cardTitle: '关于 LetRecovery',
     version: '版本',
     license: '许可证',
+    additionalTerms: '使用与分发附加规则',
     copyright: '版权所有',
     source: '开源地址',
     ackTitle: '致谢',
@@ -207,7 +209,7 @@ const en: Dict = {
   home: {
     heroTitleLines: ['A clean, ad-free', 'Windows reinstall tool'],
     heroDesc:
-      'Crafted with Rust + egui for blazing performance and a clean, ad-free, bloat-free experience. Its simple, intuitive interface makes reinstalling Windows easy — even for beginners.',
+      'Crafted with Rust and a native Windows-controls interface for blazing performance and a clean, ad-free, bloat-free experience. Its simple, intuitive interface makes reinstalling Windows easy — even for beginners.',
     download: 'Download',
     joinCommunity: 'Join Community',
     screenshotAlt: 'LetRecovery interface preview',
@@ -240,6 +242,7 @@ const en: Dict = {
     cardTitle: 'About LetRecovery',
     version: 'Version',
     license: 'License',
+    additionalTerms: 'Additional use and distribution terms',
     copyright: 'Copyright',
     source: 'Source',
     ackTitle: 'Acknowledgements',

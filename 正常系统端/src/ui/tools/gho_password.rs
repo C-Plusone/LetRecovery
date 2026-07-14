@@ -24,6 +24,7 @@ impl App {
             .default_width(500.0)
             .default_height(300.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("查看GHO密码"));
                 ui.label(tr!("查看Ghost镜像文件(.gho)的密码信息"));
                 ui.add_space(10.0);
 

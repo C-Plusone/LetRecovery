@@ -271,6 +271,7 @@ pub struct ImageVerifier {
     cancel_flag: Arc<AtomicBool>,
     /// 当前进度
     progress: Arc<AtomicU8>,
+    reset_cancel_on_verify: bool,
 }
 
 impl ImageVerifier {
@@ -279,6 +280,16 @@ impl ImageVerifier {
         Self {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicU8::new(0)),
+            reset_cancel_on_verify: true,
+        }
+    }
+
+    /// Creates a verifier that observes a caller-owned cancellation flag without clearing it.
+    pub fn with_cancel_flag(cancel_flag: Arc<AtomicBool>) -> Self {
+        Self {
+            cancel_flag,
+            progress: Arc::new(AtomicU8::new(0)),
+            reset_cancel_on_verify: false,
         }
     }
 
@@ -313,8 +324,20 @@ impl ImageVerifier {
         file_path: &str,
         progress_tx: Option<Sender<VerifyProgress>>,
     ) -> VerifyResult {
-        self.reset_cancel();
+        if self.reset_cancel_on_verify {
+            self.reset_cancel();
+        }
         self.progress.store(0, Ordering::SeqCst);
+
+        if self.is_cancelled() {
+            return VerifyResult {
+                file_path: file_path.to_string(),
+                image_type: ImageType::from_extension(file_path),
+                status: VerifyStatus::Cancelled,
+                message: tr!("校验已取消"),
+                ..Default::default()
+            };
+        }
 
         let reporter = ProgressReporter::new(progress_tx.clone(), Arc::clone(&self.progress));
         let path = Path::new(file_path);
@@ -382,16 +405,17 @@ impl ImageVerifier {
         reporter.report(1, tr!("正在打开镜像文件..."), file_path);
 
         // 打开 WIM 文件
-        let wim_handle = match wimlib.open_wim(file_path) {
-            Ok(h) => h,
-            Err(e) => {
-                return VerifyResult::corrupted(
-                    file_path,
-                    ImageType::Wim,
-                    tr!("无法打开镜像: {}", e),
-                )
-            }
-        };
+        let wim_handle =
+            match wimlib.open_wim_cancellable(file_path, Some(Arc::clone(&self.cancel_flag))) {
+                Ok(h) => h,
+                Err(e) => {
+                    return VerifyResult::corrupted(
+                        file_path,
+                        ImageType::Wim,
+                        tr!("无法打开镜像: {}", e),
+                    )
+                }
+            };
 
         reporter.report(2, tr!("正在读取镜像信息..."), file_path);
 
@@ -552,16 +576,17 @@ impl ImageVerifier {
         reporter.report(2, tr!("正在打开主分卷..."), file_path);
 
         // 打开主 SWM 文件
-        let wim_handle = match wimlib.open_wim(&swm_files[0]) {
-            Ok(h) => h,
-            Err(e) => {
-                return VerifyResult::corrupted(
-                    file_path,
-                    ImageType::Swm,
-                    tr!("无法打开主分卷: {}", e),
-                )
-            }
-        };
+        let wim_handle =
+            match wimlib.open_wim_cancellable(&swm_files[0], Some(Arc::clone(&self.cancel_flag))) {
+                Ok(h) => h,
+                Err(e) => {
+                    return VerifyResult::corrupted(
+                        file_path,
+                        ImageType::Swm,
+                        tr!("无法打开主分卷: {}", e),
+                    )
+                }
+            };
 
         reporter.report(3, tr!("正在引入其余分卷..."), file_path);
 
@@ -1056,5 +1081,13 @@ mod tests {
         assert_eq!(format!("{}", VerifyStatus::Valid), "校验通过");
         assert_eq!(format!("{}", VerifyStatus::Corrupted), "文件损坏");
         assert_eq!(format!("{}", VerifyStatus::Cancelled), "已取消");
+    }
+
+    #[test]
+    fn caller_owned_pre_cancelled_flag_is_not_reset() {
+        let cancel = Arc::new(AtomicBool::new(true));
+        let verifier = ImageVerifier::with_cancel_flag(cancel);
+        let result = verifier.verify("definitely-missing.wim", None);
+        assert_eq!(result.status, VerifyStatus::Cancelled);
     }
 }

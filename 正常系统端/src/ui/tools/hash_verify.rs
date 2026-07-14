@@ -39,6 +39,7 @@ impl App {
             .default_width(600.0)
             .default_height(360.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("文件哈希校验 (SHA-256)"));
                 ui.label(tr!(
                     "计算文件的 SHA-256，并可与期望值比对（核对下载完整性）。"
                 ));

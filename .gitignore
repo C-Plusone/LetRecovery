@@ -19,3 +19,7 @@ ghstwarn.txt
 Thumbs.db
 *.swp
 新建文本文档.bat
+
+# Local installer toolchain and build output
+/installer/output/
+/installer/tools/

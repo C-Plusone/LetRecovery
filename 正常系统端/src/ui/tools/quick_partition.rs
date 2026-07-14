@@ -632,6 +632,7 @@ impl App {
             .min_width(600.0)
             .default_height(500.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("一键分区"));
                 // 加载中
                 if self.quick_partition_state.loading {
                     ui.vertical_centered(|ui| {

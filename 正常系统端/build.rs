@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rerun-if-changed=assets/icon.png");
 
     // 注：libwim-15.dll 已内置于共享库 lr-core，运行时自动释放到 exe 目录，
     // 这里不再需要从 vendor 复制。
@@ -21,10 +22,14 @@ fn main() {
 
         let mut res = winres::WindowsResource::new();
 
-        // 设置程序图标
-        if std::path::Path::new("assets/icon.ico").exists() {
-            res.set_icon("assets/icon.ico");
-        }
+        // 仓库历史 icon.ico 无法被 Windows 稳定解析。始终从 PNG 生成合法 ICO，
+        // 避免窗口类和 EXE 文件属性退回系统默认应用图标。
+        let generated_icon = generate_icon_from_png();
+        res.set_icon(
+            generated_icon
+                .to_str()
+                .expect("generated icon path is UTF-8"),
+        );
 
         // 设置程序信息
         res.set("ProductName", "LetRecovery");
@@ -90,6 +95,58 @@ fn main() {
     // 非 Windows 平台也要消除未使用变量告警
     #[cfg(not(windows))]
     let _ = numeric_version;
+}
+
+#[cfg(windows)]
+fn generate_icon_from_png() -> std::path::PathBuf {
+    use image::imageops::FilterType;
+    use image::{ImageEncoder, RgbaImage};
+    use std::io::Write;
+
+    let source = image::open("assets/icon.png")
+        .expect("failed to open assets/icon.png")
+        .into_rgba8();
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+        .join("LetRecovery.generated.ico");
+    const SIZES: [u32; 8] = [16, 20, 24, 32, 40, 48, 64, 256];
+    let mut images = Vec::with_capacity(SIZES.len());
+    for size in SIZES {
+        let resized: RgbaImage = image::imageops::resize(&source, size, size, FilterType::Lanczos3);
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(
+                resized.as_raw(),
+                size,
+                size,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("failed to encode generated icon frame");
+        images.push((size, png));
+    }
+
+    let directory_bytes = 6 + 16 * images.len();
+    let total_image_bytes: usize = images.iter().map(|(_, png)| png.len()).sum();
+    let mut bytes = Vec::with_capacity(directory_bytes + total_image_bytes);
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&(images.len() as u16).to_le_bytes());
+    let mut offset = directory_bytes as u32;
+    for (size, png) in &images {
+        let dimension = if *size == 256 { 0 } else { *size as u8 };
+        bytes.extend_from_slice(&[dimension, dimension, 0, 0]);
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&32u16.to_le_bytes());
+        bytes.extend_from_slice(&(png.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&offset.to_le_bytes());
+        offset += png.len() as u32;
+    }
+    for (_, png) in images {
+        bytes.extend_from_slice(&png);
+    }
+    let mut file = std::fs::File::create(&output).expect("failed to create generated icon");
+    file.write_all(&bytes)
+        .expect("failed to encode generated icon");
+    output
 }
 
 /// 取当前 UTC 日期 (年, 月, 日)，无第三方依赖。

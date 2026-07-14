@@ -14,9 +14,6 @@ struct IconLoadResult {
 
 impl App {
     pub fn show_online_download(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("在线下载"));
-        ui.separator();
-
         // 检查远程配置状态
         if let Some(ref remote_config) = self.remote_config {
             if !remote_config.loaded && !self.remote_config_loading {
@@ -312,38 +309,42 @@ impl App {
             .id_salt("software_list")
             .show(ui, |ui| {
                 for (i, soft) in software_list.iter().enumerate() {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            // 图标区域：58x58，内部居中显示图标
-                            ui.allocate_ui(egui::vec2(58.0, 58.0), |ui| {
-                                ui.centered_and_justified(|ui| {
-                                    self.show_soft_icon(ui, soft);
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // 图标区域：58x58，内部居中显示图标
+                                ui.allocate_ui(egui::vec2(58.0, 58.0), |ui| {
+                                    ui.centered_and_justified(|ui| {
+                                        self.show_soft_icon(ui, soft);
+                                    });
                                 });
-                            });
 
-                            ui.add_space(10.0);
+                                ui.add_space(10.0);
 
-                            // 软件信息
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.strong(&soft.name);
-                                    ui.label(format!("| {}", soft.file_size));
+                                // 软件信息
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.strong(&soft.name);
+                                        ui.label(format!("| {}", soft.file_size));
+                                    });
+                                    ui.label(&soft.description);
+                                    ui.small(tr!("更新日期: {}", soft.update_date));
                                 });
-                                ui.label(&soft.description);
-                                ui.small(tr!("更新日期: {}", soft.update_date));
-                            });
 
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button(tr!("下载")).clicked() {
-                                        soft_to_download = Some(i);
-                                    }
-                                },
-                            );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button(tr!("下载")).clicked() {
+                                            soft_to_download = Some(i);
+                                        }
+                                    },
+                                );
+                            });
                         });
-                    });
-                    ui.add_space(5.0);
+                    if i + 1 < software_list.len() {
+                        ui.separator();
+                    }
                 }
             });
 
@@ -615,6 +616,7 @@ impl App {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .min_width(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("下载 - {}", pending.name));
                 ui.add_space(10.0);
 
                 // 保存目录
@@ -808,38 +810,42 @@ impl App {
             .id_salt("gpu_driver_list")
             .show(ui, |ui| {
                 for (i, driver) in gpu_driver_list.iter().enumerate() {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            // 图标区域：58x58，内部居中显示图标
-                            ui.allocate_ui(egui::vec2(58.0, 58.0), |ui| {
-                                ui.centered_and_justified(|ui| {
-                                    self.show_gpu_driver_icon(ui, driver);
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // 图标区域：58x58，内部居中显示图标
+                                ui.allocate_ui(egui::vec2(58.0, 58.0), |ui| {
+                                    ui.centered_and_justified(|ui| {
+                                        self.show_gpu_driver_icon(ui, driver);
+                                    });
                                 });
-                            });
 
-                            ui.add_space(10.0);
+                                ui.add_space(10.0);
 
-                            // 驱动信息
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.strong(&driver.name);
-                                    ui.label(format!("| {}", driver.file_size));
+                                // 驱动信息
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.strong(&driver.name);
+                                        ui.label(format!("| {}", driver.file_size));
+                                    });
+                                    ui.label(&driver.description);
+                                    ui.small(tr!("更新日期: {}", driver.update_date));
                                 });
-                                ui.label(&driver.description);
-                                ui.small(tr!("更新日期: {}", driver.update_date));
-                            });
 
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button(tr!("下载")).clicked() {
-                                        driver_to_download = Some(i);
-                                    }
-                                },
-                            );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button(tr!("下载")).clicked() {
+                                            driver_to_download = Some(i);
+                                        }
+                                    },
+                                );
+                            });
                         });
-                    });
-                    ui.add_space(5.0);
+                    if i + 1 < gpu_driver_list.len() {
+                        ui.separator();
+                    }
                 }
             });
 

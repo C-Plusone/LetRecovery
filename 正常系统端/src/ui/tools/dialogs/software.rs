@@ -22,6 +22,7 @@ impl App {
             .default_width(500.0)
             .default_height(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("已安装软件列表"));
                 if is_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();

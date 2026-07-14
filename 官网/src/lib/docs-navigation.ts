@@ -46,6 +46,7 @@ const sidebarZh: SidebarItem[] = [
   {
     text: '更多',
     items: [
+      { text: '使用与分发规则', link: '/docs/guide/terms' },
       { text: '常见问题', link: '/docs/guide/faq' },
       { text: '交流社区', link: '/docs/guide/community' },
     ],
@@ -90,6 +91,7 @@ const sidebarEn: SidebarItem[] = [
   {
     text: 'More',
     items: [
+      { text: 'Use and Distribution Terms', link: '/docs/guide/terms' },
       { text: 'FAQ', link: '/docs/guide/faq' },
       { text: 'Community', link: '/docs/guide/community' },
     ],

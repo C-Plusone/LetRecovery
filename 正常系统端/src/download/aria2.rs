@@ -42,10 +42,20 @@ pub enum DownloadStatus {
     Error(String),
 }
 
+fn aria2_connection_args(download_threads: u8) -> [String; 2] {
+    let split = crate::core::app_config::normalize_download_threads(download_threads);
+    let per_server = split.min(16);
+    [
+        format!("--split={split}"),
+        format!("--max-connection-per-server={per_server}"),
+    ]
+}
+
 /// aria2 下载管理器
 pub struct Aria2Manager {
     client: Option<Arc<aria2_ws::Client>>,
     aria2_process: Option<Child>,
+    download_threads: u8,
 }
 
 impl Aria2Manager {
@@ -71,7 +81,7 @@ impl Aria2Manager {
         }
 
         // 启动新的管理器
-        match Self::start_internal().await {
+        match Self::start_internal(16).await {
             Ok(manager) => {
                 *guard = Some(manager);
                 ARIA2_WARMED_UP.store(true, Ordering::SeqCst);
@@ -93,7 +103,7 @@ impl Aria2Manager {
             let mut guard = global.lock().await;
             if guard.is_none() {
                 log::info!("[aria2] 全局管理器不存在，正在创建...");
-                let manager = Self::start_internal().await?;
+                let manager = Self::start_internal(16).await?;
                 *guard = Some(manager);
                 ARIA2_WARMED_UP.store(true, Ordering::SeqCst);
             }
@@ -103,7 +113,9 @@ impl Aria2Manager {
     }
 
     /// 内部启动方法
-    async fn start_internal() -> Result<Self> {
+    async fn start_internal(download_threads: u8) -> Result<Self> {
+        let download_threads =
+            crate::core::app_config::normalize_download_threads(download_threads);
         let bin_dir = get_bin_dir();
         let aria2c_path = bin_dir.join("aria2c.exe");
 
@@ -115,6 +127,7 @@ impl Aria2Manager {
         let start_time = std::time::Instant::now();
 
         // 启动 aria2c 进程，启用 RPC
+        let connection_args = aria2_connection_args(download_threads);
         let process = create_command(&aria2c_path)
             .args([
                 "--daemon=true",
@@ -122,14 +135,13 @@ impl Aria2Manager {
                 "--rpc-listen-port=6800",
                 "--rpc-allow-origin-all=true",
                 "--max-concurrent-downloads=5",
-                "--split=32",
-                "--max-connection-per-server=16",
                 "--min-split-size=1M",
                 "--file-allocation=none",
                 "--continue=true",
                 "--auto-file-renaming=false",
                 "--allow-overwrite=true",
             ])
+            .args(&connection_args)
             .spawn()?;
 
         log::info!("[aria2] aria2c 进程已启动，正在等待 RPC 服务就绪...");
@@ -173,12 +185,18 @@ impl Aria2Manager {
         Ok(Self {
             client: Some(Arc::new(client)),
             aria2_process: Some(process),
+            download_threads,
         })
     }
 
     /// 启动 aria2c 进程并连接（公开接口，向后兼容）
     pub async fn start() -> Result<Self> {
-        Self::start_internal().await
+        Self::start_with_download_threads(16).await
+    }
+
+    /// Starts an independent aria2 process using the configured per-file connection count.
+    pub async fn start_with_download_threads(download_threads: u8) -> Result<Self> {
+        Self::start_internal(download_threads).await
     }
 
     /// 添加下载任务
@@ -207,8 +225,8 @@ impl Aria2Manager {
 
         let mut options = aria2_ws::TaskOptions {
             dir: Some(save_dir.to_string()),
-            split: Some(32),
-            max_connection_per_server: Some(16),
+            split: Some(self.download_threads as i32),
+            max_connection_per_server: Some(self.download_threads.min(16) as i32),
             ..aria2_ws::TaskOptions::default()
         };
 
@@ -347,5 +365,26 @@ pub async fn cleanup_global_aria2() {
             let _ = manager.shutdown().await;
         }
         ARIA2_WARMED_UP.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aria2_arguments_use_the_selected_supported_thread_count() {
+        assert_eq!(
+            aria2_connection_args(8),
+            ["--split=8", "--max-connection-per-server=8"]
+        );
+        assert_eq!(
+            aria2_connection_args(99),
+            ["--split=32", "--max-connection-per-server=16"]
+        );
+        assert_eq!(
+            aria2_connection_args(16),
+            ["--split=16", "--max-connection-per-server=16"]
+        );
     }
 }

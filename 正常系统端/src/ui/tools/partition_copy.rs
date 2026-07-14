@@ -609,9 +609,18 @@ pub fn execute_partition_copy(
         }
     }
 
-    // 复制完成，删除标记文件
-    if let Err(e) = delete_copy_marker(target_partition) {
-        log::warn!("删除标记文件失败: {}", e);
+    // Only a complete copy may discard its resume journal. Keeping the marker
+    // after per-file failures lets the confirmed native retry continue from
+    // files that were durably recorded instead of reporting a false success.
+    if progress.failed_count == 0 {
+        if let Err(e) = delete_copy_marker(target_partition) {
+            log::warn!("删除标记文件失败: {}", e);
+        }
+    } else {
+        log::warn!(
+            "分区对拷有 {} 个文件失败，保留断点标记",
+            progress.failed_count
+        );
     }
 
     // 发送完成进度

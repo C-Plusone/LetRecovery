@@ -3,6 +3,7 @@
 
 use crate::tr;
 use anyhow::{Context, Result};
+use lr_core::download_integrity::validate_download_url;
 use serde::Deserialize;
 
 /// 全局服务器地址
@@ -119,11 +120,23 @@ impl RemoteConfig {
         let data = config_response.data;
 
         // 构建 PE 和 DL 的完整 URL
-        let pe_url = Self::resolve_url(&data.pe);
-        let dl_url = Self::resolve_url(&data.dl);
-        let soft_url = data.soft.as_ref().map(|s| Self::resolve_url(s));
-        let easy_url = data.easy.as_ref().map(|s| Self::resolve_url(s));
-        let gpu_url = data.gpu.as_ref().map(|s| Self::resolve_url(s));
+        let pe_url = Self::resolve_catalogue_url(&data.pe)?;
+        let dl_url = Self::resolve_catalogue_url(&data.dl)?;
+        let soft_url = data
+            .soft
+            .as_deref()
+            .map(Self::resolve_catalogue_url)
+            .transpose()?;
+        let easy_url = data
+            .easy
+            .as_deref()
+            .map(Self::resolve_catalogue_url)
+            .transpose()?;
+        let gpu_url = data
+            .gpu
+            .as_deref()
+            .map(Self::resolve_catalogue_url)
+            .transpose()?;
 
         log::info!("PE 配置 URL: {}", pe_url);
         log::info!("DL 配置 URL: {}", dl_url);
@@ -138,19 +151,27 @@ impl RemoteConfig {
         }
 
         // 获取 PE 配置内容
-        let pe_content = Self::fetch_text_content(&client, &pe_url).ok();
+        let pe_content =
+            Some(Self::fetch_text_content(&client, &pe_url).context(tr!("加载 PE 资源目录失败"))?);
 
         // 获取 DL 配置内容
-        let dl_content = Self::fetch_text_content(&client, &dl_url).ok();
+        let dl_content =
+            Some(Self::fetch_text_content(&client, &dl_url).context(tr!("加载系统镜像目录失败"))?);
 
         // 获取 Soft 配置内容
-        let soft_content = soft_url.and_then(|url| Self::fetch_text_content(&client, &url).ok());
+        let soft_content = soft_url
+            .map(|url| Self::fetch_text_content(&client, &url).context(tr!("加载软件目录失败")))
+            .transpose()?;
 
         // 获取 Easy 配置内容
-        let easy_content = easy_url.and_then(|url| Self::fetch_text_content(&client, &url).ok());
+        let easy_content = easy_url
+            .map(|url| Self::fetch_text_content(&client, &url).context(tr!("加载小白模式目录失败")))
+            .transpose()?;
 
         // 获取 GPU 配置内容
-        let gpu_content = gpu_url.and_then(|url| Self::fetch_text_content(&client, &url).ok());
+        let gpu_content = gpu_url
+            .map(|url| Self::fetch_text_content(&client, &url).context(tr!("加载显卡驱动目录失败")))
+            .transpose()?;
 
         Ok((
             pe_content,
@@ -173,6 +194,17 @@ impl RemoteConfig {
             // 相对路径，拼接服务器地址
             format!("{}{}", SERVER_BASE_URL, path.trim_start_matches('/'))
         }
+    }
+
+    /// The fixed endpoint is the trust boundary for legacy payload URLs.  Its
+    /// child catalogues must therefore remain HTTPS; otherwise an HTTP
+    /// catalogue could silently replace the exact payload URL later selected
+    /// by the controller.
+    fn resolve_catalogue_url(path: &str) -> Result<String> {
+        let url = Self::resolve_url(path);
+        validate_download_url(&url, false)
+            .map(|validated| validated.into_string())
+            .map_err(|error| anyhow::anyhow!(tr!("下载地址不安全或无效: {}", error)))
     }
 
     /// 获取文本内容
@@ -226,5 +258,12 @@ mod tests {
             RemoteConfig::resolve_url("https://example.com/config/pe"),
             "https://example.com/config/pe"
         );
+    }
+
+    #[test]
+    fn catalogue_documents_cannot_downgrade_to_http() {
+        let error =
+            RemoteConfig::resolve_catalogue_url("http://example.com/soft.json").unwrap_err();
+        assert!(error.to_string().contains("HTTPS"));
     }
 }

@@ -4,9 +4,7 @@
 mod names;
 
 use names::is_placeholder;
-pub use names::{
-    beautify_gpu_name, beautify_manufacturer_name, beautify_memory_manufacturer, is_placeholder_str,
-};
+pub use names::{beautify_gpu_name, beautify_manufacturer_name, beautify_memory_manufacturer};
 
 use std::collections::HashMap;
 use std::ffi::OsString;

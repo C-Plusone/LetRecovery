@@ -10,7 +10,9 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 use crate::core::dism_cmd::DismCmd;
 use crate::core::driver::DriverManager;
@@ -79,6 +81,17 @@ impl Dism {
         index: u32,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
+        self.apply_image_cancellable(image_file, apply_dir, index, progress_tx, None)
+    }
+
+    pub fn apply_image_cancellable(
+        &self,
+        image_file: &str,
+        apply_dir: &str,
+        index: u32,
+        progress_tx: Option<Sender<DismProgress>>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<()> {
         log::info!(
             "[Dism] 使用 wimlib 应用镜像: {} -> {}",
             image_file,
@@ -105,7 +118,8 @@ impl Dism {
         });
 
         // 应用镜像
-        let result = wim_manager.apply_image(image_file, apply_dir, index, Some(wim_tx));
+        let result =
+            wim_manager.apply_image_cancellable(image_file, apply_dir, index, Some(wim_tx), cancel);
 
         // 等待转发线程结束
         let _ = forward_thread.join();

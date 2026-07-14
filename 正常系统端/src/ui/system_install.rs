@@ -1,4 +1,5 @@
 use egui;
+use egui_extras::{Column, TableBuilder};
 use std::sync::mpsc;
 
 use crate::app::{App, BootModeSelection, UnattendCheckResult};
@@ -25,9 +26,6 @@ pub enum ImageInfoResult {
 
 impl App {
     pub fn show_system_install(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("系统安装"));
-        ui.separator();
-
         // 整页套一层垂直滚动：窗口调小时也能滚动到底部的「开始安装」按钮等控件。
         egui::ScrollArea::vertical()
             .id_salt("system_install_page_scroll")
@@ -203,71 +201,73 @@ impl App {
         let partitions_clone: Vec<Partition> = self.partitions.clone();
         let mut partition_clicked: Option<usize> = None;
 
-        egui::ScrollArea::vertical()
-            .max_height(200.0)
-            .show(ui, |ui| {
-                egui::Grid::new("partition_grid")
-                    .striped(true)
-                    .min_col_width(60.0)
-                    .show(ui, |ui| {
-                        ui.label(tr!("分区卷"));
-                        ui.label(tr!("总空间"));
-                        ui.label(tr!("可用空间"));
-                        ui.label(tr!("卷标"));
-                        ui.label(tr!("分区表"));
-                        ui.label("BitLocker");
-                        ui.label(tr!("状态"));
-                        ui.end_row();
-
-                        for (i, partition) in partitions_clone.iter().enumerate() {
-                            let label = if is_pe {
-                                if partition.has_windows {
-                                    tr!("{} (有系统)", partition.letter)
-                                } else {
-                                    partition.letter.clone()
-                                }
-                            } else if partition.is_system_partition {
-                                tr!("{} (当前系统)", partition.letter)
-                            } else if partition.has_windows {
-                                tr!("{} (有系统)", partition.letter)
-                            } else {
-                                partition.letter.clone()
-                            };
-
-                            if ui
-                                .selectable_label(self.selected_partition == Some(i), &label)
-                                .clicked()
-                            {
-                                partition_clicked = Some(i);
-                            }
-
-                            ui.label(Self::format_size(partition.total_size_mb));
-                            ui.label(Self::format_size(partition.free_size_mb));
-                            ui.label(&partition.label);
-                            ui.label(format!("{}", partition.partition_style));
-
-                            // 显示 BitLocker 状态
-                            let status_color = match partition.bitlocker_status {
-                                crate::core::bitlocker::VolumeStatus::EncryptedLocked => egui::Color32::RED,
-                                crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => egui::Color32::from_rgb(102, 187, 106),
-                                crate::core::bitlocker::VolumeStatus::Encrypting |
-                                crate::core::bitlocker::VolumeStatus::Decrypting => {
-                                    crate::ui::activity_text_color(ui.visuals().dark_mode)
-                                }
-                                _ => ui.visuals().text_color(),
-                            };
-                            ui.colored_label(status_color, tr!(partition.bitlocker_status.as_str()));
-
-                            let status = if partition.has_windows {
-                                tr!("已有系统")
-                            } else {
-                                tr!("空闲")
-                            };
-                            ui.label(status);
-
-                            ui.end_row();
-                        }
+        TableBuilder::new(ui)
+            .id_salt("partition_table")
+            .striped(true)
+            .resizable(false)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .max_scroll_height(170.0)
+            .column(Column::auto().at_least(96.0))
+            .column(Column::auto().at_least(68.0))
+            .column(Column::auto().at_least(68.0))
+            .column(Column::auto().at_least(60.0))
+            .column(Column::auto().at_least(58.0))
+            .column(Column::auto().at_least(72.0))
+            .column(Column::remainder().at_least(54.0))
+            .header(24.0, |mut header| {
+                for text in [
+                    tr!("分区卷"),
+                    tr!("总空间"),
+                    tr!("可用空间"),
+                    tr!("卷标"),
+                    tr!("分区表"),
+                    "BitLocker".to_owned(),
+                    tr!("状态"),
+                ] {
+                    header.col(|ui| {
+                        ui.strong(text);
                     });
+                }
+            })
+            .body(|body| {
+                body.rows(25.0, partitions_clone.len(), |mut row| {
+                    let i = row.index();
+                    let partition = &partitions_clone[i];
+                    row.set_selected(self.selected_partition == Some(i));
+                    let label = if is_pe {
+                        if partition.has_windows {
+                            tr!("{} (有系统)", partition.letter)
+                        } else {
+                            partition.letter.clone()
+                        }
+                    } else if partition.is_system_partition {
+                        tr!("{} (当前系统)", partition.letter)
+                    } else if partition.has_windows {
+                        tr!("{} (有系统)", partition.letter)
+                    } else {
+                        partition.letter.clone()
+                    };
+                    row.col(|ui| { ui.label(label); });
+                    row.col(|ui| { ui.label(Self::format_size(partition.total_size_mb)); });
+                    row.col(|ui| { ui.label(Self::format_size(partition.free_size_mb)); });
+                    row.col(|ui| { ui.label(&partition.label); });
+                    row.col(|ui| { ui.label(format!("{}", partition.partition_style)); });
+                    row.col(|ui| {
+                        let color = match partition.bitlocker_status {
+                            crate::core::bitlocker::VolumeStatus::EncryptedLocked => egui::Color32::RED,
+                            crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => egui::Color32::from_rgb(102, 187, 106),
+                            crate::core::bitlocker::VolumeStatus::Encrypting | crate::core::bitlocker::VolumeStatus::Decrypting => crate::ui::activity_text_color(ui.visuals().dark_mode),
+                            _ => ui.visuals().text_color(),
+                        };
+                        ui.colored_label(color, tr!(partition.bitlocker_status.as_str()));
+                    });
+                    row.col(|ui| {
+                        ui.label(if partition.has_windows { tr!("已有系统") } else { tr!("空闲") });
+                    });
+                    if row.response().clicked() {
+                        partition_clicked = Some(i);
+                    }
+                });
             });
 
         // 处理分区选择
@@ -589,52 +589,7 @@ impl App {
             );
         }
 
-        ui.horizontal(|ui| {
-            if ui.button(tr!("高级选项...")).clicked() {
-                self.show_advanced_options = true;
-                // 每次打开重新检测 WiFi，决定是否显示“迁移当前 WiFi”选项
-                self.advanced_options.wifi_detected = None;
-            }
-            if ui.button(tr!("刷新分区")).clicked() {
-                self.refresh_partitions();
-            }
-        });
-
-        ui.add_space(20.0);
-
-        ui.add_space(10.0);
-
-        // 开始安装按钮
-        let can_install = self.selected_partition.is_some()
-            && !self.local_image_path.is_empty()
-            && (self.local_image_path.ends_with(".gho") || self.selected_volume.is_some())
-            && !install_blocked
-            && (!show_pe_selector || self.selected_pe_for_install.is_some())
-            // 选择了自定义无人值守但语法有误 -> 禁用安装
-            && self.custom_unattend_error.is_none()
-            && !self.boot_pca_detection_loading
-            && self.boot_pca_selection_error().is_none();
-
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    can_install && !self.is_installing,
-                    egui::Button::new(tr!("开始安装")).min_size(egui::vec2(120.0, 35.0)),
-                )
-                .clicked()
-            {
-                self.start_installation();
-            }
-
-            // 显示安装模式提示
-            if can_install {
-                if needs_pe && !is_pe {
-                    ui.label(tr!("(将通过PE环境安装)"));
-                } else {
-                    ui.label(tr!("(直接安装)"));
-                }
-            }
-        });
+        ui.add_space(8.0);
 
         // 警告：安装到有系统的分区
         if let Some(idx) = self.selected_partition {
@@ -649,6 +604,34 @@ impl App {
             }
         }
             }); // end ScrollArea
+    }
+
+    pub(crate) fn show_system_install_command(&mut self, ui: &mut egui::Ui) {
+        let is_pe = self.is_pe_environment();
+        let needs_pe = self.check_if_needs_pe_for_install();
+        let show_pe_selector = !is_pe && needs_pe;
+        let install_blocked = show_pe_selector && !self.is_pe_config_available();
+        let can_install = self.selected_partition.is_some()
+            && !self.local_image_path.is_empty()
+            && (self.local_image_path.ends_with(".gho") || self.selected_volume.is_some())
+            && !install_blocked
+            && (!show_pe_selector || self.selected_pe_for_install.is_some())
+            && self.custom_unattend_error.is_none()
+            && !self.boot_pca_detection_loading
+            && self.boot_pca_selection_error().is_none();
+
+        ui.add_enabled_ui(can_install && !self.is_installing, |ui| {
+            if crate::ui::inno_components::primary_button(ui, tr!("开始安装")).clicked() {
+                self.start_installation();
+            }
+        });
+        if crate::ui::inno_components::secondary_button(ui, tr!("刷新分区")).clicked() {
+            self.refresh_partitions();
+        }
+        if crate::ui::inno_components::secondary_button(ui, tr!("高级选项...")).clicked() {
+            self.show_advanced_options = true;
+            self.advanced_options.wifi_detected = None;
+        }
     }
 
     /// 检查是否需要通过PE安装

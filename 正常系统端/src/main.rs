@@ -1,24 +1,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(dead_code)]
 
-mod app;
 mod core;
 mod download;
-mod ui;
+mod native_ui;
 mod utils;
 
-use eframe::egui;
 use std::sync::Arc;
 
 /// 预加载的配置数据
 pub struct PreloadedConfig {
+    pub app_config: core::app_config::AppConfig,
     pub remote_config: Option<download::server_config::RemoteConfig>,
     pub system_info: Option<core::system_info::SystemInfo>,
     pub hardware_info: Option<core::hardware_info::HardwareInfo>,
     pub partitions: Vec<core::disk::Partition>,
 }
 
-fn main() -> eframe::Result<()> {
+fn main() -> anyhow::Result<()> {
     // 加载应用配置（用于获取日志设置）
     let app_config = core::app_config::AppConfig::load();
 
@@ -46,6 +45,19 @@ fn main() -> eframe::Result<()> {
     // 检查命令行参数，处理PE环境下的自动安装/备份
     let args: Vec<String> = std::env::args().collect();
 
+    // 该 feature 只用于无副作用的 UI/单元测试。即使调用者传入正式操作参数，
+    // 也不能在非管理员开发构建中进入安装、备份或 PE 工作流。
+    #[cfg(feature = "non-elevated-tests")]
+    if args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "/INSTALL" | "--install" | "/PEINSTALL" | "--pe-install" | "/PEBACKUP" | "--pe-backup"
+        )
+    }) {
+        log::error!("开发 UI 测试构建拒绝执行安装、备份或 PE 命令行入口");
+        return Ok(());
+    }
+
     if args.contains(&"/PEINSTALL".to_string()) || args.contains(&"--pe-install".to_string()) {
         log::info!("检测到PE安装模式，执行自动安装...");
         return run_pe_install();
@@ -56,17 +68,23 @@ fn main() -> eframe::Result<()> {
         return run_pe_backup();
     }
 
-    // 检查管理员权限
-    if !utils::privilege::is_admin() {
-        log::warn!("需要管理员权限，正在尝试提升权限...");
-        if let Err(e) = utils::privilege::restart_as_admin() {
-            log::error!("提升权限失败: {}", e);
-            log::error!("需要管理员权限运行此程序");
+    // 开发 UI 测试构建必须保持 asInvoker，避免每次视觉迭代都弹 UAC。
+    // build.rs 已拒绝 release + non-elevated-tests，因此正式产物仍强制管理员权限。
+    #[cfg(not(feature = "non-elevated-tests"))]
+    {
+        if !utils::privilege::is_admin() {
+            log::warn!("需要管理员权限，正在尝试提升权限...");
+            if let Err(e) = utils::privilege::restart_as_admin() {
+                log::error!("提升权限失败: {}", e);
+                log::error!("需要管理员权限运行此程序");
+            }
+            return Ok(());
         }
-        return Ok(());
+        log::info!("已获得管理员权限");
     }
 
-    log::info!("已获得管理员权限");
+    #[cfg(feature = "non-elevated-tests")]
+    log::warn!("开发 UI 测试构建：已跳过管理员检测和自动提权");
 
     // 命令行无人值守安装：--install --config <install.json> [--advanced <advanced.json>]
     // 放在确认管理员权限之后、GUI 初始化之前；不进 GUI，准备好后（默认）重启进 PE 完成安装。
@@ -77,6 +95,7 @@ fn main() -> eframe::Result<()> {
     }
 
     // 记录本机配置信息，便于用户反馈问题时开发者排查
+    #[cfg(not(feature = "non-elevated-tests"))]
     if app_config.log_enabled {
         log_machine_info();
     }
@@ -88,6 +107,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    #[cfg(not(feature = "non-elevated-tests"))]
     // 检查依赖文件完整性
     if let Err(missing_files) = check_dependencies() {
         log::error!("依赖文件缺失: {:?}", missing_files);
@@ -103,6 +123,7 @@ fn main() -> eframe::Result<()> {
 
     log::info!("依赖文件检查通过");
 
+    #[cfg(not(feature = "non-elevated-tests"))]
     // 检查系统核心组件（极限精简系统检测）
     if let Err(missing_components) = check_system_components() {
         log::error!("系统组件缺失: {:?}", missing_components);
@@ -118,7 +139,12 @@ fn main() -> eframe::Result<()> {
     log::info!("系统组件检查通过");
 
     // 防止重复运行
-    let _mutex = match single_instance::SingleInstance::new("LetRecovery-mutex-2025") {
+    #[cfg(not(feature = "non-elevated-tests"))]
+    let mutex_name = "LetRecovery-mutex-2025";
+    #[cfg(feature = "non-elevated-tests")]
+    let mutex_name = "LetRecovery-native-ui-preview-mutex";
+
+    let _mutex = match single_instance::SingleInstance::new(mutex_name) {
         Ok(m) => {
             if !m.is_single() {
                 log::warn!("程序已在运行中");
@@ -135,52 +161,39 @@ fn main() -> eframe::Result<()> {
     log::info!("正在预加载配置和系统信息...");
 
     // 在显示窗口前先加载服务器配置和系统信息
-    let preloaded_config = preload_all_config();
+    #[cfg(not(feature = "non-elevated-tests"))]
+    let preloaded_config = preload_all_config(app_config.clone());
+
+    // 原生 UI 开发预览不联网、不枚举安装目标分区；系统与硬件摘要仍在窗口
+    // 显示前只读加载，确保无 UAC 的测试产物与正式版硬件页行为一致。
+    #[cfg(feature = "non-elevated-tests")]
+    let preloaded_config = {
+        let system_info = std::thread::spawn(|| core::system_info::SystemInfo::collect().ok());
+        let hardware_info =
+            std::thread::spawn(|| core::hardware_info::HardwareInfo::collect().ok());
+        PreloadedConfig {
+            app_config: app_config.clone(),
+            remote_config: None,
+            system_info: system_info.join().ok().flatten(),
+            hardware_info: hardware_info.join().ok().flatten(),
+            partitions: Vec::new(),
+        }
+    };
     let preloaded_config = Arc::new(preloaded_config);
 
     log::info!("预加载完成，初始化 GUI...");
 
-    // 加载图标
-    log::info!("加载图标...");
-    let icon = load_icon();
-
-    // 设置窗口选项
-    log::info!("创建窗口选项...");
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([950.0, 680.0])
-            .with_min_inner_size([800.0, 600.0])
-            .with_icon(icon),
-        centered: true,
-        ..Default::default()
-    };
-
-    // 运行应用，传入预加载的配置
-    log::info!("启动 eframe 窗口...");
-    let config_clone = preloaded_config.clone();
-    eframe::run_native(
-        &crate::tr!("LetRecovery - Windows系统一键重装工具"),
-        options,
-        Box::new(move |cc| {
-            log::info!("eframe 回调开始创建 App...");
-            Ok(Box::new(app::App::new_with_preloaded(cc, &config_clone)))
-        }),
-    )
+    log::info!("启动原生 Win32 窗口...");
+    native_ui::run(preloaded_config)?;
+    Ok(())
 }
 
 /// 预加载所有配置和系统信息
-fn preload_all_config() -> PreloadedConfig {
-    use std::time::{Duration, Instant};
+fn preload_all_config(app_config: core::app_config::AppConfig) -> PreloadedConfig {
+    use std::time::Instant;
 
-    // 只等待远程配置和分区信息（这两个比较快且重要）
-    // 系统信息和硬件信息改为异步加载，不阻塞窗口显示
-
-    let remote_config_handle = std::thread::spawn(|| {
-        log::info!("开始加载远程配置...");
-        let config = download::server_config::RemoteConfig::load_from_server();
-        log::info!("远程配置加载完成: loaded={}", config.loaded);
-        config
-    });
+    // 窗口显示前并行读取分区、系统和硬件信息。硬件页首次出现时必须已经
+    // 有确定的成功或失败状态，不能要求用户再点击一次“刷新”才开始读取。
 
     let partitions_handle = std::thread::spawn(|| {
         log::info!("开始获取分区信息...");
@@ -189,54 +202,39 @@ fn preload_all_config() -> PreloadedConfig {
         partitions
     });
 
-    // 等待远程配置（带超时）
-    let start = Instant::now();
-    let timeout = Duration::from_secs(5);
+    let system_info_handle = std::thread::spawn(|| {
+        log::info!("开始获取系统信息...");
+        let info = core::system_info::SystemInfo::collect().ok();
+        log::info!("系统信息获取完成: success={}", info.is_some());
+        info
+    });
 
-    log::info!("等待远程配置...");
-    let remote_config = loop {
-        if remote_config_handle.is_finished() {
-            break remote_config_handle.join().ok();
-        }
-        if start.elapsed() > timeout {
-            log::warn!("远程配置加载超时，跳过");
-            break None;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
+    let hardware_info_handle = std::thread::spawn(|| {
+        log::info!("开始获取硬件信息...");
+        let info = core::hardware_info::HardwareInfo::collect().ok();
+        log::info!("硬件信息获取完成: success={}", info.is_some());
+        info
+    });
+
+    let start = Instant::now();
 
     // 等待分区信息（这个通常很快）
     log::info!("等待分区信息...");
     let partitions = partitions_handle.join().ok().unwrap_or_default();
+    let system_info = system_info_handle.join().ok().flatten();
+    let hardware_info = hardware_info_handle.join().ok().flatten();
 
     log::info!("预加载完成，耗时: {:?}", start.elapsed());
 
-    // 系统信息和硬件信息不在这里等待，改为在 App 中异步加载
     PreloadedConfig {
-        remote_config,
-        system_info: None,   // 稍后异步加载
-        hardware_info: None, // 稍后异步加载
+        app_config,
+        // 网络目录由原生窗口在创建后异步加载。这样超时/错误能够回到页面，且不会
+        // 留下一个主线程已经放弃接收、但仍在后台运行的预加载线程。
+        remote_config: None,
+        system_info,
+        hardware_info,
         partitions,
     }
-}
-
-fn load_icon() -> egui::IconData {
-    // 使用内嵌的图标数据（编译时嵌入）
-    const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
-
-    // 从内嵌的PNG数据加载图标
-    if let Ok(image) = image::load_from_memory(ICON_BYTES) {
-        let image = image.to_rgba8();
-        let (width, height) = image.dimensions();
-        return egui::IconData {
-            rgba: image.into_raw(),
-            width,
-            height,
-        };
-    }
-
-    // 如果解析失败，返回默认图标
-    egui::IconData::default()
 }
 
 /// 检查程序依赖文件完整性
@@ -353,7 +351,7 @@ fn arg_value(args: &[String], names: &[&str]) -> Option<String> {
 }
 
 /// `--install` 入口：校验参数后调用命令行无人值守安装。
-fn run_cli_install_entry(config: Option<&str>, advanced: Option<&str>) -> eframe::Result<()> {
+fn run_cli_install_entry(config: Option<&str>, advanced: Option<&str>) -> anyhow::Result<()> {
     let config = match config {
         Some(c) if !c.is_empty() => c,
         _ => {
@@ -370,7 +368,7 @@ fn run_cli_install_entry(config: Option<&str>, advanced: Option<&str>) -> eframe
     Ok(())
 }
 
-fn run_pe_install() -> eframe::Result<()> {
+fn run_pe_install() -> anyhow::Result<()> {
     use core::install_config::ConfigFileManager;
 
     log::info!("[PE INSTALL] ========== PE自动安装模式 ==========");
@@ -452,7 +450,7 @@ fn run_pe_install() -> eframe::Result<()> {
 }
 
 /// PE环境下自动执行备份
-fn run_pe_backup() -> eframe::Result<()> {
+fn run_pe_backup() -> anyhow::Result<()> {
     use core::install_config::ConfigFileManager;
 
     log::info!("[PE BACKUP] ========== PE自动备份模式 ==========");
@@ -617,7 +615,7 @@ fn execute_pe_install(
 
     log::info!("[PE INSTALL] Step 5: 应用高级选项");
     // 应用高级选项
-    let advanced_options = ui::advanced_options::AdvancedOptions {
+    let advanced_options = core::advanced_options_legacy::AdvancedOptions {
         remove_shortcut_arrow: config.remove_shortcut_arrow,
         restore_classic_context_menu: config.restore_classic_context_menu,
         bypass_nro: config.bypass_nro,
@@ -632,7 +630,7 @@ fn execute_pe_install(
         username: config.custom_username.clone(),
         xp_inject_usb3_driver: config.xp_inject_usb3_driver,
         xp_inject_nvme_driver: config.xp_inject_nvme_driver,
-        ..ui::advanced_options::AdvancedOptions::default()
+        ..core::advanced_options_legacy::AdvancedOptions::default()
     };
 
     let _ = advanced_options.apply_to_system(target_partition, is_xp);

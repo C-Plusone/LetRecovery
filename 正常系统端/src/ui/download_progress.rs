@@ -51,9 +51,6 @@ static INTEGRITY_VERIFY_RX: std::sync::Mutex<Option<mpsc::Receiver<IntegrityVeri
 
 impl App {
     pub fn show_download_progress(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("下载进度"));
-        ui.separator();
-
         // 从channel接收进度更新
         self.update_download_progress();
 
@@ -104,27 +101,6 @@ impl App {
         if let Some(ref error) = self.download_init_error {
             ui.add_space(15.0);
             ui.colored_label(egui::Color32::RED, tr!("错误: {}", error));
-            ui.add_space(10.0);
-            if ui.button(tr!("返回")).clicked() {
-                self.download_init_error = None;
-                // 先获取待执行操作
-                let action = self.pe_download_then_action.take();
-                // 根据操作类型返回对应页面
-                match action {
-                    Some(crate::app::PeDownloadThenAction::Install) => {
-                        self.current_panel = crate::app::Panel::SystemInstall;
-                    }
-                    Some(crate::app::PeDownloadThenAction::Backup) => {
-                        self.current_panel = crate::app::Panel::SystemBackup;
-                    }
-                    Some(crate::app::PeDownloadThenAction::Expand) => {
-                        self.current_panel = crate::app::Panel::Tools;
-                    }
-                    None => {
-                        self.current_panel = crate::app::Panel::OnlineDownload;
-                    }
-                }
-            }
             return;
         }
 
@@ -183,14 +159,8 @@ impl App {
             ui.horizontal(|ui| {
                 match status {
                     DownloadStatus::Active => {
-                        if ui.button(tr!("暂停")).clicked() {
-                            self.pause_current_download();
-                        }
                     }
                     DownloadStatus::Paused => {
-                        if ui.button(tr!("继续")).clicked() {
-                            self.resume_current_download();
-                        }
                     }
                     DownloadStatus::Complete => {
                         // A declared checksum is mandatory; missing metadata remains a
@@ -445,10 +415,7 @@ impl App {
                     _ => {}
                 }
 
-                if !is_complete && !is_error
-                    && ui.button(tr!("取消")).clicked() {
-                        self.cancel_current_download();
-                    }
+                let _ = (is_complete, is_error);
             });
         } else {
             // 显示等待状态或无任务
@@ -458,10 +425,46 @@ impl App {
                 ui.spinner();
             } else {
                 ui.label(tr!("没有正在进行的下载任务"));
-                if ui.button(tr!("返回")).clicked() {
+            }
+        }
+    }
+
+    pub(crate) fn show_download_progress_command(&mut self, ui: &mut egui::Ui) {
+        if self.download_init_error.is_some() {
+            if crate::ui::inno_components::secondary_button(ui, tr!("返回")).clicked() {
+                self.download_init_error = None;
+                self.cancel_current_download();
+            }
+            return;
+        }
+
+        let status = self
+            .download_progress
+            .as_ref()
+            .map(|progress| progress.status.clone());
+        match status {
+            Some(DownloadStatus::Active) => {
+                if crate::ui::inno_components::secondary_button(ui, tr!("取消")).clicked() {
+                    self.cancel_current_download();
+                }
+                if crate::ui::inno_components::secondary_button(ui, tr!("暂停")).clicked() {
+                    self.pause_current_download();
+                }
+            }
+            Some(DownloadStatus::Paused) => {
+                if crate::ui::inno_components::secondary_button(ui, tr!("取消")).clicked() {
+                    self.cancel_current_download();
+                }
+                if crate::ui::inno_components::primary_button(ui, tr!("继续")).clicked() {
+                    self.resume_current_download();
+                }
+            }
+            None if self.current_download.is_none() => {
+                if crate::ui::inno_components::secondary_button(ui, tr!("返回")).clicked() {
                     self.current_panel = crate::app::Panel::OnlineDownload;
                 }
             }
+            _ => {}
         }
     }
 

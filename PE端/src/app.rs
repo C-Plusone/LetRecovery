@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -11,6 +11,7 @@ use crate::tr;
 use crate::ui::progress::{BackupStep, InstallStep, ProgressState, ProgressUI};
 use crate::utils::reboot_pe;
 use crate::workflow_journal::PeWorkflowJournal;
+use crate::workflow_journal::RecoveryCheckpointSnapshot;
 
 /// 递归查找目录中的所有 CAB 文件
 fn find_cab_files_in_directory(dir: &str) -> Vec<PathBuf> {
@@ -54,13 +55,19 @@ pub(crate) enum WorkerMessage {
     Failed(String),
 }
 
-pub struct App {
+pub(crate) struct WorkflowSession {
     /// 进度状态
     progress_state: Arc<Mutex<ProgressState>>,
     /// 消息接收器
     message_rx: Option<Receiver<WorkerMessage>>,
     /// 是否已启动
     started: bool,
+    /// Worker handle is retained so display terminal messages cannot be mistaken for the end of
+    /// cleanup, delay and reboot tail work.
+    worker_handle: Option<thread::JoinHandle<()>>,
+    worker_finished: bool,
+    terminal_message_seen: bool,
+    channel_failure_reported: bool,
     /// 操作类型
     operation_type: Option<OperationType>,
     /// Durable observer for crash diagnostics. Recording failures never block
@@ -68,36 +75,24 @@ pub struct App {
     workflow_journal: Option<PeWorkflowJournal>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkflowRecoverySnapshot {
+    pub checkpoint: Option<RecoveryCheckpointSnapshot>,
+    pub worker_started: bool,
+    pub worker_finished: bool,
+}
+
+pub struct App {
+    session: WorkflowSession,
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // 设置中文字体
         Self::setup_fonts(&cc.egui_ctx);
 
-        // 检测操作类型
-        let operation_type = ConfigFileManager::detect_operation_type();
-        let workflow_journal = operation_type.and_then(|operation_type| {
-            match PeWorkflowJournal::create(operation_type) {
-                Ok(journal) => journal,
-                Err(error) => {
-                    log::warn!("[CHECKPOINT] 无法创建工作流检查点，将继续原流程: {}", error);
-                    None
-                }
-            }
-        });
-
-        let progress_state = Arc::new(Mutex::new(match operation_type {
-            Some(OperationType::Install) => ProgressState::new_install(),
-            Some(OperationType::Backup) => ProgressState::new_backup(),
-            Some(OperationType::Expand) => ProgressState::new_expand(),
-            None => ProgressState::new_install(),
-        }));
-
         Self {
-            progress_state,
-            message_rx: None,
-            started: false,
-            operation_type,
-            workflow_journal,
+            session: WorkflowSession::new(),
         }
     }
 
@@ -171,9 +166,47 @@ impl App {
 
         ctx.set_fonts(fonts);
     }
+}
+
+impl WorkflowSession {
+    pub(crate) fn new() -> Self {
+        let operation_type = ConfigFileManager::detect_operation_type();
+        Self::new_for_operation(operation_type)
+    }
+
+    pub(crate) fn new_for_operation(operation_type: Option<OperationType>) -> Self {
+        let workflow_journal = operation_type.and_then(|operation_type| {
+            match PeWorkflowJournal::create(operation_type) {
+                Ok(journal) => journal,
+                Err(error) => {
+                    log::warn!("[CHECKPOINT] 无法创建工作流检查点，将继续原流程: {}", error);
+                    None
+                }
+            }
+        });
+
+        let progress_state = Arc::new(Mutex::new(match operation_type {
+            Some(OperationType::Install) => ProgressState::new_install(),
+            Some(OperationType::Backup) => ProgressState::new_backup(),
+            Some(OperationType::Expand) => ProgressState::new_expand(),
+            None => ProgressState::new_install(),
+        }));
+
+        WorkflowSession {
+            progress_state,
+            message_rx: None,
+            started: false,
+            worker_handle: None,
+            worker_finished: false,
+            terminal_message_seen: false,
+            channel_failure_reported: false,
+            operation_type,
+            workflow_journal,
+        }
+    }
 
     /// 启动工作线程
-    fn start_worker(&mut self) {
+    pub(crate) fn start_worker(&mut self) {
         if self.started {
             return;
         }
@@ -184,7 +217,7 @@ impl App {
 
         let operation_type = self.operation_type;
 
-        thread::spawn(move || match operation_type {
+        self.worker_handle = Some(thread::spawn(move || match operation_type {
             Some(OperationType::Install) => {
                 execute_install_workflow(tx);
             }
@@ -197,13 +230,25 @@ impl App {
             None => {
                 let _ = tx.send(WorkerMessage::Failed(tr!("未检测到安装或备份配置")));
             }
-        });
+        }));
     }
 
     /// 处理工作线程消息
-    fn process_messages(&mut self) {
+    pub(crate) fn process_messages(&mut self) {
+        let mut disconnected = false;
         if let Some(ref rx) = self.message_rx {
-            while let Ok(msg) = rx.try_recv() {
+            loop {
+                let msg = match rx.try_recv() {
+                    Ok(msg) => msg,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                };
+                if matches!(msg, WorkerMessage::Completed | WorkerMessage::Failed(_)) {
+                    self.terminal_message_seen = true;
+                }
                 if let Some(journal) = self.workflow_journal.as_mut() {
                     let result = match &msg {
                         WorkerMessage::SetInstallStep(step) => journal.observe_install_step(*step),
@@ -240,22 +285,74 @@ impl App {
                 }
             }
         }
+        if disconnected && !self.terminal_message_seen && !self.channel_failure_reported {
+            self.channel_failure_reported = true;
+            self.terminal_message_seen = true;
+            let message = tr!("工作线程异常终止");
+            if let Some(journal) = self.workflow_journal.as_mut() {
+                if let Err(error) = journal.fail(&message) {
+                    log::warn!("[CHECKPOINT] 记录工作线程异常终止失败，将继续显示错误: {error}");
+                }
+            }
+            if let Ok(mut state) = self.progress_state.lock() {
+                state.mark_failed(&message);
+            }
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> ProgressState {
+        self.progress_state
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+    }
+
+    pub(crate) fn recovery_snapshot(&self) -> WorkflowRecoverySnapshot {
+        WorkflowRecoverySnapshot {
+            checkpoint: self
+                .workflow_journal
+                .as_ref()
+                .map(PeWorkflowJournal::recovery_snapshot),
+            worker_started: self.started,
+            worker_finished: self.worker_finished,
+        }
+    }
+
+    pub(crate) fn reap_worker_if_finished(&mut self) -> bool {
+        if self.worker_finished {
+            return true;
+        }
+        let finished = self
+            .worker_handle
+            .as_ref()
+            .is_some_and(thread::JoinHandle::is_finished);
+        if !finished {
+            return false;
+        }
+        if let Some(handle) = self.worker_handle.take() {
+            if handle.join().is_err() {
+                log::error!("PE 工作线程在完成尾处理时发生 panic");
+            }
+        }
+        self.worker_finished = true;
+        true
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 启动工作线程
-        if !self.started {
-            self.start_worker();
+        if !self.session.started {
+            self.session.start_worker();
         }
 
         // 处理消息
-        self.process_messages();
+        self.session.process_messages();
+        let _ = self.session.reap_worker_if_finished();
 
         // 绘制界面
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Ok(state) = self.progress_state.lock() {
+            if let Ok(state) = self.session.progress_state.lock() {
                 ProgressUI::show(ui, &state);
             }
         });
@@ -1168,4 +1265,55 @@ fn generate_win10_unattend_xml(
         username = username,
         first_logon_commands = first_logon_commands
     )
+}
+
+#[cfg(test)]
+mod workflow_session_tests {
+    use super::*;
+
+    fn disconnected_session() -> (WorkflowSession, Sender<WorkerMessage>) {
+        let (tx, rx) = channel();
+        (
+            WorkflowSession {
+                progress_state: Arc::new(Mutex::new(ProgressState::new_install())),
+                message_rx: Some(rx),
+                started: true,
+                worker_handle: None,
+                worker_finished: false,
+                terminal_message_seen: false,
+                channel_failure_reported: false,
+                operation_type: Some(OperationType::Install),
+                workflow_journal: None,
+            },
+            tx,
+        )
+    }
+
+    #[test]
+    fn unexpected_worker_disconnect_becomes_a_terminal_failure() {
+        let (mut session, tx) = disconnected_session();
+        drop(tx);
+
+        session.process_messages();
+
+        let state = session.snapshot();
+        assert!(state.is_failed);
+        assert_eq!(state.error_message, Some(tr!("工作线程异常终止")));
+        assert!(session.terminal_message_seen);
+        assert!(session.channel_failure_reported);
+    }
+
+    #[test]
+    fn disconnect_after_completed_does_not_replace_the_terminal_result() {
+        let (mut session, tx) = disconnected_session();
+        tx.send(WorkerMessage::Completed).unwrap();
+        drop(tx);
+
+        session.process_messages();
+
+        let state = session.snapshot();
+        assert!(state.is_completed);
+        assert!(!state.is_failed);
+        assert!(!session.channel_failure_reported);
+    }
 }

@@ -52,9 +52,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub allow_insecure_http_downloads: bool,
 
+    /// 单个下载任务使用的并行分片数，只接受 8、16、32 三档。aria2 的单服务器
+    /// 连接上限仍限制为 16；旧配置没有此字段时保持迁移前的 16 连接行为。
+    #[serde(default = "default_download_threads")]
+    pub download_threads: u8,
+
     /// 「系统安装」页选项偏好（记住上次勾选状态，下次启动自动恢复）。
     #[serde(default)]
-    pub install_prefs: crate::app::InstallPrefs,
+    pub install_prefs: crate::core::ui_state::InstallPrefs,
 }
 
 /// 日志默认启用
@@ -72,6 +77,22 @@ fn default_language() -> String {
     String::from("zh-CN")
 }
 
+/// 把旧配置或损坏配置归一到 UI 暴露的 8、16、32 三档。
+///
+/// 12 和 24 是相邻档位的中点；中点选择更高一档，避免旧的较大配置被意外降得
+/// 过低。aria2 的 `max-connection-per-server` 会在执行边界单独限制为 16。
+pub const fn normalize_download_threads(threads: u8) -> u8 {
+    match threads {
+        0..=11 => 8,
+        12..=23 => 16,
+        _ => 32,
+    }
+}
+
+const fn default_download_threads() -> u8 {
+    16
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -85,7 +106,8 @@ impl Default for AppConfig {
             wim_engine: 0, // 默认 libwim
             enable_advanced_options: false,
             allow_insecure_http_downloads: false,
-            install_prefs: crate::app::InstallPrefs::default(),
+            download_threads: default_download_threads(),
+            install_prefs: crate::core::ui_state::InstallPrefs::default(),
         }
     }
 }
@@ -115,7 +137,9 @@ impl AppConfig {
         }
 
         match std::fs::read_to_string(&config_path) {
-            Ok(content) => serde_json::from_str::<AppConfig>(&content).unwrap_or_default(),
+            Ok(content) => serde_json::from_str::<AppConfig>(&content)
+                .map(Self::normalized)
+                .unwrap_or_default(),
             Err(_) => Self::default(),
         }
     }
@@ -134,7 +158,7 @@ impl AppConfig {
             Ok(content) => match serde_json::from_str::<AppConfig>(&content) {
                 Ok(config) => {
                     log::info!("加载配置文件成功");
-                    config
+                    config.normalized()
                 }
                 Err(e) => {
                     log::warn!("解析配置文件失败: {}，使用默认配置", e);
@@ -155,6 +179,11 @@ impl AppConfig {
         std::fs::write(&config_path, content)?;
         log::info!("配置文件已保存");
         Ok(())
+    }
+
+    fn normalized(mut self) -> Self {
+        self.download_threads = normalize_download_threads(self.download_threads);
+        self
     }
 
     /// 设置小白模式状态并保存
@@ -226,6 +255,14 @@ impl AppConfig {
         }
     }
 
+    /// 设置单个下载任务的并行连接数。新值从下一个下载任务开始生效。
+    pub fn set_download_threads(&mut self, threads: u8) {
+        self.download_threads = normalize_download_threads(threads);
+        if let Err(e) = self.save() {
+            log::warn!("保存配置失败: {}", e);
+        }
+    }
+
     /// 设置界面语言并保存
     ///
     /// # Arguments
@@ -279,4 +316,36 @@ pub fn get_current_username() -> Option<String> {
 #[cfg(not(windows))]
 pub fn get_current_username() -> Option<String> {
     std::env::var("USER").ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_json_without_download_threads_keeps_legacy_connection_count() {
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.download_threads, 16);
+    }
+
+    #[test]
+    fn download_threads_are_normalized_to_supported_tiers() {
+        assert_eq!(normalize_download_threads(0), 8);
+        assert_eq!(normalize_download_threads(8), 8);
+        assert_eq!(normalize_download_threads(11), 8);
+        assert_eq!(normalize_download_threads(12), 16);
+        assert_eq!(normalize_download_threads(16), 16);
+        assert_eq!(normalize_download_threads(23), 16);
+        assert_eq!(normalize_download_threads(24), 32);
+        assert_eq!(normalize_download_threads(32), 32);
+        assert_eq!(normalize_download_threads(u8::MAX), 32);
+    }
+
+    #[test]
+    fn loaded_legacy_thread_values_are_normalized_before_use() {
+        let mut config: AppConfig = serde_json::from_str(r#"{"download_threads":20}"#).unwrap();
+        assert_eq!(config.download_threads, 20);
+        config = config.normalized();
+        assert_eq!(config.download_threads, 16);
+    }
 }

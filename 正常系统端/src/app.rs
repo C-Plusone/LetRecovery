@@ -1149,16 +1149,29 @@ impl App {
 
         // 动态获取 Windows 目录
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let font_path = std::path::Path::new(&windir).join("Fonts").join("msyh.ttc");
+        let fonts_dir = std::path::Path::new(&windir).join("Fonts");
+        let segoe_path = fonts_dir.join("segoeui.ttf");
+        let yahei_path = fonts_dir.join("msyh.ttc");
 
-        if let Ok(font_data) = std::fs::read(font_path) {
+        if let Ok(font_data) = std::fs::read(segoe_path) {
+            fonts.font_data.insert(
+                "segoe_ui".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+            );
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                family.insert(0, "segoe_ui".to_owned());
+            }
+        }
+
+        if let Ok(font_data) = std::fs::read(yahei_path) {
             fonts.font_data.insert(
                 "msyh".to_owned(),
                 std::sync::Arc::new(egui::FontData::from_owned(font_data)),
             );
 
             if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-                family.insert(0, "msyh".to_owned());
+                let insert_at = usize::from(family.first().is_some_and(|name| name == "segoe_ui"));
+                family.insert(insert_at, "msyh".to_owned());
             } else {
                 log::warn!("[App] 未找到 Proportional 字体族，跳过中文字体注入");
             }
@@ -1175,48 +1188,25 @@ impl App {
 
     fn setup_style(ctx: &egui::Context) {
         let mut options = ctx.options(|o| o.clone());
+        const SCROLL_BAR_WIDTH: f32 = 5.0;
+        const SCROLL_BAR_MARGIN: f32 = 1.0;
 
         // 修改深色样式
         let mut dark_style = (*options.dark_style).clone();
-        dark_style.text_styles = [
-            (egui::TextStyle::Small, egui::FontId::proportional(12.0)),
-            (egui::TextStyle::Body, egui::FontId::proportional(14.0)),
-            (egui::TextStyle::Button, egui::FontId::proportional(14.0)),
-            (egui::TextStyle::Heading, egui::FontId::proportional(20.0)),
-            (egui::TextStyle::Monospace, egui::FontId::monospace(14.0)),
-        ]
-        .into();
-        dark_style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-        dark_style.spacing.button_padding = egui::vec2(10.0, 5.0);
-        // 滚动条设置 - 使滚动条更明显
-        dark_style.spacing.scroll.bar_width = 5.0;
-        dark_style.spacing.scroll.bar_inner_margin = 2.0;
-        dark_style.spacing.scroll.bar_outer_margin = 2.0;
+        crate::ui::inno_theme::apply_to_style(&mut dark_style, true);
+        // 使用常驻细滚动条，减少内容区右侧占用。
+        dark_style.spacing.scroll.bar_width = SCROLL_BAR_WIDTH;
+        dark_style.spacing.scroll.bar_inner_margin = SCROLL_BAR_MARGIN;
+        dark_style.spacing.scroll.bar_outer_margin = SCROLL_BAR_MARGIN;
         dark_style.spacing.scroll.floating = false; // 不使用浮动滚动条，始终显示
 
         // 修改浅色样式
         let mut light_style = (*options.light_style).clone();
-        light_style.text_styles = [
-            (egui::TextStyle::Small, egui::FontId::proportional(12.0)),
-            (egui::TextStyle::Body, egui::FontId::proportional(14.0)),
-            (egui::TextStyle::Button, egui::FontId::proportional(14.0)),
-            (egui::TextStyle::Heading, egui::FontId::proportional(20.0)),
-            (egui::TextStyle::Monospace, egui::FontId::monospace(14.0)),
-        ]
-        .into();
-        light_style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-        light_style.spacing.button_padding = egui::vec2(10.0, 5.0);
-        // 滚动条设置 - 使滚动条更明显
-        light_style.spacing.scroll.bar_width = 10.0;
-        light_style.spacing.scroll.bar_inner_margin = 2.0;
-        light_style.spacing.scroll.bar_outer_margin = 2.0;
+        crate::ui::inno_theme::apply_to_style(&mut light_style, false);
+        light_style.spacing.scroll.bar_width = SCROLL_BAR_WIDTH;
+        light_style.spacing.scroll.bar_inner_margin = SCROLL_BAR_MARGIN;
+        light_style.spacing.scroll.bar_outer_margin = SCROLL_BAR_MARGIN;
         light_style.spacing.scroll.floating = false; // 不使用浮动滚动条，始终显示
-
-        light_style.visuals.widgets.inactive.expansion = 0.0;
-        light_style.visuals.widgets.hovered.expansion = 0.0;
-        light_style.visuals.widgets.active.expansion = 0.0;
-        light_style.visuals.widgets.open.expansion = 0.0;
-        light_style.visuals.widgets.noninteractive.expansion = 0.0;
 
         options.dark_style = std::sync::Arc::new(dark_style);
         options.light_style = std::sync::Arc::new(light_style);
@@ -1627,17 +1617,14 @@ impl eframe::App for App {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(10.0);
-                        ui.colored_label(egui::Color32::RED, "");
-                        ui.add_space(10.0);
-                        ui.label(&self.error_dialog_message);
-                        ui.add_space(20.0);
+                    crate::ui::inno_components::dialog_header(ui, tr!("错误"));
+                    ui.label(&self.error_dialog_message);
+                    ui.add_space(12.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(tr!("确定")).clicked() {
                             self.show_error_dialog = false;
                             self.error_dialog_message.clear();
                         }
-                        ui.add_space(10.0);
                     });
                 });
         }
@@ -1650,11 +1637,7 @@ impl eframe::App for App {
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .min_width(400.0)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(10.0);
-                        ui.colored_label(crate::ui::warning_text_color(ui.visuals().dark_mode), "");
-                        ui.add_space(10.0);
-                    });
+                    crate::ui::inno_components::dialog_header(ui, tr!("无人值守选项不可用"));
 
                     ui.label(tr!(
                         "目标分区的系统文件中已存在无人值守配置文件（unattend.xml）。"
@@ -1707,37 +1690,62 @@ impl eframe::App for App {
             self.render_backup_bitlocker_dialog(ui);
         });
 
-        // 底部状态栏
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(info) = &self.system_info {
-                    ui.label(tr!(
-                        "启动模式: {} | TPM: {} {} | 安全启动: {} | {}",
-                        info.boot_mode,
-                        if info.tpm_enabled {
-                            tr!("已启用")
-                        } else {
-                            tr!("已禁用")
+        // Inno 风格固定命令栏：状态位于左侧，当前页面的主要操作固定在右侧。
+        let footer_palette =
+            crate::ui::inno_theme::Palette::for_dark_mode(ctx.style().visuals.dark_mode);
+        egui::TopBottomPanel::bottom("wizard_command_bar")
+            .exact_height(42.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(footer_palette.surface)
+                    .stroke(egui::Stroke::new(1.0, footer_palette.border))
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some(info) = &self.system_info {
+                        ui.label(
+                            egui::RichText::new(tr!(
+                                "启动模式: {} | TPM: {} {} | 安全启动: {} | {}",
+                                info.boot_mode,
+                                if info.tpm_enabled {
+                                    tr!("已启用")
+                                } else {
+                                    tr!("已禁用")
+                                },
+                                if !info.tpm_version.is_empty() {
+                                    format!("v{}", info.tpm_version)
+                                } else {
+                                    String::new()
+                                },
+                                if info.secure_boot {
+                                    tr!("已开启")
+                                } else {
+                                    tr!("已关闭")
+                                },
+                                if info.is_pe_environment {
+                                    tr!("PE环境")
+                                } else {
+                                    tr!("桌面环境")
+                                },
+                            ))
+                            .small(),
+                        );
+                    }
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| match self.current_panel {
+                            Panel::SystemInstall => self.show_system_install_command(ui),
+                            Panel::SystemBackup => self.show_system_backup_command(ui),
+                            Panel::InstallProgress => self.show_install_progress_command(ui),
+                            Panel::BackupProgress => self.show_backup_progress_command(ui),
+                            Panel::DownloadProgress => self.show_download_progress_command(ui),
+                            Panel::HardwareInfo => self.show_hardware_info_command(ui),
+                            _ => {}
                         },
-                        if !info.tpm_version.is_empty() {
-                            format!("v{}", info.tpm_version)
-                        } else {
-                            String::new()
-                        },
-                        if info.secure_boot {
-                            tr!("已开启")
-                        } else {
-                            tr!("已关闭")
-                        },
-                        if info.is_pe_environment {
-                            tr!("PE环境")
-                        } else {
-                            tr!("桌面环境")
-                        },
-                    ));
-                }
+                    );
+                });
             });
-        });
 
         // 操作进行中时隐藏导航栏，让进度/操作页面占满窗口。
         let is_busy = self.is_installing || self.is_backing_up || self.current_download.is_some();
@@ -1745,13 +1753,13 @@ impl eframe::App for App {
         // 左侧导航栏
         if !is_busy {
             egui::SidePanel::left("nav_panel")
-                .min_width(150.0)
+                .exact_width(138.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("LetRecovery");
+                        ui.label(egui::RichText::new("LetRecovery").size(17.0).strong());
                     });
 
-                    ui.add_space(20.0);
+                    ui.add_space(12.0);
 
                     // 检查是否启用小白模式（PE环境下强制禁用）
                     let is_pe = self
@@ -1775,83 +1783,65 @@ impl eframe::App for App {
                     } else {
                         tr!("系统安装")
                     };
-                    if ui
-                        .add_enabled(
-                            !is_busy || self.current_panel == Panel::SystemInstall,
-                            egui::SelectableLabel::new(
-                                self.current_panel == Panel::SystemInstall,
-                                system_install_label,
-                            ),
-                        )
-                        .clicked()
+                    if crate::ui::inno_components::navigation_item(
+                        ui,
+                        self.current_panel == Panel::SystemInstall,
+                        system_install_label,
+                    )
+                    .clicked()
                     {
                         self.current_panel = Panel::SystemInstall;
                     }
 
                     // 小白模式下隐藏以下菜单
                     if !easy_mode {
-                        if ui
-                            .add_enabled(
-                                !is_busy || self.current_panel == Panel::SystemBackup,
-                                egui::SelectableLabel::new(
-                                    self.current_panel == Panel::SystemBackup,
-                                    tr!("系统备份"),
-                                ),
-                            )
-                            .clicked()
+                        if crate::ui::inno_components::navigation_item(
+                            ui,
+                            self.current_panel == Panel::SystemBackup,
+                            tr!("系统备份"),
+                        )
+                        .clicked()
                         {
                             self.current_panel = Panel::SystemBackup;
                         }
 
-                        if ui
-                            .add_enabled(
-                                !is_busy || self.current_panel == Panel::OnlineDownload,
-                                egui::SelectableLabel::new(
-                                    self.current_panel == Panel::OnlineDownload,
-                                    tr!("在线下载"),
-                                ),
-                            )
-                            .clicked()
+                        if crate::ui::inno_components::navigation_item(
+                            ui,
+                            self.current_panel == Panel::OnlineDownload,
+                            tr!("在线下载"),
+                        )
+                        .clicked()
                         {
                             self.current_panel = Panel::OnlineDownload;
                         }
 
-                        if ui
-                            .add_enabled(
-                                !is_busy || self.current_panel == Panel::Tools,
-                                egui::SelectableLabel::new(
-                                    self.current_panel == Panel::Tools,
-                                    tr!("工具箱"),
-                                ),
-                            )
-                            .clicked()
+                        if crate::ui::inno_components::navigation_item(
+                            ui,
+                            self.current_panel == Panel::Tools,
+                            tr!("工具箱"),
+                        )
+                        .clicked()
                         {
                             self.current_panel = Panel::Tools;
                         }
 
-                        if ui
-                            .add_enabled(
-                                !is_busy || self.current_panel == Panel::HardwareInfo,
-                                egui::SelectableLabel::new(
-                                    self.current_panel == Panel::HardwareInfo,
-                                    tr!("硬件信息"),
-                                ),
-                            )
-                            .clicked()
+                        if crate::ui::inno_components::navigation_item(
+                            ui,
+                            self.current_panel == Panel::HardwareInfo,
+                            tr!("硬件信息"),
+                        )
+                        .clicked()
                         {
                             self.current_panel = Panel::HardwareInfo;
                         }
                     }
 
-                    if ui
-                        .add_enabled(
-                            !is_busy || self.current_panel == Panel::About,
-                            egui::SelectableLabel::new(
-                                self.current_panel == Panel::About,
-                                tr!("关于"),
-                            ),
-                        )
-                        .clicked()
+                    if crate::ui::inno_components::navigation_item(
+                        ui,
+                        self.current_panel == Panel::About,
+                        tr!("关于"),
+                    )
+                    .clicked()
                     {
                         self.current_panel = Panel::About;
                     }
@@ -1867,23 +1857,64 @@ impl eframe::App for App {
             .unwrap_or(false);
         let easy_mode_for_panel = self.app_config.easy_mode_enabled && !is_pe_for_panel;
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.current_panel {
-            Panel::SystemInstall => {
-                if easy_mode_for_panel {
-                    self.show_easy_mode_install(ui, ctx);
-                } else {
-                    self.show_system_install(ui);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::central_panel(ctx.style().as_ref())
+                    .inner_margin(egui::Margin::symmetric(20, 10)),
+            )
+            .show(ctx, |ui| {
+                let (title, description) = match self.current_panel {
+                    Panel::SystemInstall if easy_mode_for_panel => (
+                        tr!("系统重装"),
+                        tr!("选择 Windows 系统并按推荐设置重新安装。"),
+                    ),
+                    Panel::SystemInstall => {
+                        (tr!("系统安装"), tr!("选择系统镜像、目标分区和安装选项。"))
+                    }
+                    Panel::SystemBackup => {
+                        (tr!("系统备份"), tr!("选择源分区、保存位置和备份格式。"))
+                    }
+                    Panel::OnlineDownload => {
+                        (tr!("在线下载"), tr!("下载 Windows 镜像、驱动和常用软件。"))
+                    }
+                    Panel::Tools => (tr!("工具箱"), tr!("运行系统维护、修复和诊断工具。")),
+                    Panel::HardwareInfo => (
+                        tr!("系统与硬件信息"),
+                        tr!("查看当前计算机的系统与硬件摘要。"),
+                    ),
+                    Panel::DownloadProgress => {
+                        (tr!("下载进度"), tr!("正在下载并验证所选文件，请稍候。"))
+                    }
+                    Panel::InstallProgress => {
+                        (tr!("安装进度"), tr!("正在准备或安装 Windows，请稍候。"))
+                    }
+                    Panel::BackupProgress => (tr!("备份进度"), tr!("正在创建系统备份，请稍候。")),
+                    Panel::About => (
+                        tr!("关于 LetRecovery"),
+                        tr!("版本: {}", env!("BUILD_VERSION")),
+                    ),
+                };
+                crate::ui::inno_components::page_header(ui, title, description);
+                ui.add_space(10.0);
+
+                match self.current_panel {
+                    Panel::SystemInstall => {
+                        if easy_mode_for_panel {
+                            self.show_easy_mode_install(ui, ctx);
+                        } else {
+                            self.show_system_install(ui);
+                        }
+                    }
+                    Panel::SystemBackup => self.show_system_backup(ui),
+                    Panel::OnlineDownload => self.show_online_download(ui),
+                    Panel::Tools => self.show_tools(ui),
+                    Panel::HardwareInfo => self.show_hardware_info(ui),
+                    Panel::DownloadProgress => self.show_download_progress(ui),
+                    Panel::InstallProgress => self.show_install_progress(ui),
+                    Panel::BackupProgress => self.show_backup_progress(ui),
+                    Panel::About => self.show_about(ui),
                 }
-            }
-            Panel::SystemBackup => self.show_system_backup(ui),
-            Panel::OnlineDownload => self.show_online_download(ui),
-            Panel::Tools => self.show_tools(ui),
-            Panel::HardwareInfo => self.show_hardware_info(ui),
-            Panel::DownloadProgress => self.show_download_progress(ui),
-            Panel::InstallProgress => self.show_install_progress(ui),
-            Panel::BackupProgress => self.show_backup_progress(ui),
-            Panel::About => self.show_about(ui),
-        });
+            });
 
         // 高级选项窗口
         if self.show_advanced_options {
@@ -2051,6 +2082,12 @@ impl eframe::App for App {
                 .min_width(500.0)
                 .min_height(400.0)
                 .show(ctx, |ui| {
+                    crate::ui::inno_components::page_header(
+                        ui,
+                        tr!("高级选项"),
+                        tr!("配置驱动、系统设置和安装脚本。"),
+                    );
+                    ui.add_space(8.0);
                     self.advanced_options.show_ui(
                         ui,
                         self.hardware_info.as_ref(),

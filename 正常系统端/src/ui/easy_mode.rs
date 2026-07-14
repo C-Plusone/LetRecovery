@@ -19,9 +19,6 @@ impl App {
         // 检查ISO挂载状态和镜像信息加载状态（支持小白模式自动安装）
         self.check_iso_mount_status();
 
-        ui.heading(tr!("系统重装"));
-        ui.separator();
-
         // 显示设置提示
         if !self.app_config.easy_mode_settings_tip_dismissed {
             ui.horizontal(|ui| {

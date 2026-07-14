@@ -121,6 +121,7 @@ impl App {
             .default_width(650.0)
             .default_height(550.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("分区对拷"));
                 ui.label(tr!("将源分区的所有文件复制到目标分区（支持断点续传）"));
                 ui.add_space(10.0);
 

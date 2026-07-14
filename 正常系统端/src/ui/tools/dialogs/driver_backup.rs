@@ -20,6 +20,7 @@ impl App {
             .resizable(false)
             .default_width(500.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("驱动备份还原"));
                 ui.label(tr!("导出或导入系统驱动"));
                 ui.add_space(10.0);
 

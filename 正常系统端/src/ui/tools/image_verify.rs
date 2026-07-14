@@ -28,6 +28,7 @@ impl App {
             .default_width(600.0)
             .default_height(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("镜像校验"));
                 ui.label(tr!(
                     "校验镜像文件的完整性，支持 WIM、ESD、SWM、GHO、ISO 格式"
                 ));

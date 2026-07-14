@@ -6,9 +6,6 @@ use crate::tr;
 
 impl App {
     pub fn show_hardware_info(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("系统与硬件信息"));
-        ui.separator();
-
         // PE 环境提示
         if let Some(info) = &self.system_info {
             if info.is_pe_environment {
@@ -19,24 +16,6 @@ impl App {
                 ui.add_space(5.0);
             }
         }
-
-        // 操作按钮区域
-        ui.horizontal(|ui| {
-            // 复制按钮
-            if ui.button(tr!("复制全部信息")).clicked() {
-                if let Some(hw_info) = &self.hardware_info {
-                    let formatted_text = hw_info.to_formatted_text(self.system_info.as_ref());
-                    ui.ctx().copy_text(formatted_text);
-                }
-            }
-
-            // 导出按钮
-            if ui.button(tr!("导出为TXT")).clicked() {
-                self.export_hardware_info_to_txt();
-            }
-        });
-
-        ui.add_space(10.0);
 
         egui::ScrollArea::vertical()
             .id_salt("hardware_scroll")
@@ -405,6 +384,18 @@ impl App {
                     ui.label(tr!("正在加载硬件信息..."));
                 }
             });
+    }
+
+    pub(crate) fn show_hardware_info_command(&mut self, ui: &mut egui::Ui) {
+        if crate::ui::inno_components::secondary_button(ui, tr!("导出为TXT")).clicked() {
+            self.export_hardware_info_to_txt();
+        }
+        if crate::ui::inno_components::secondary_button(ui, tr!("复制全部信息")).clicked() {
+            if let Some(hw_info) = &self.hardware_info {
+                ui.ctx()
+                    .copy_text(hw_info.to_formatted_text(self.system_info.as_ref()));
+            }
+        }
     }
 
     /// 导出硬件信息为TXT文件

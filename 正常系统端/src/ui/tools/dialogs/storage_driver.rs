@@ -19,6 +19,7 @@ impl App {
             .resizable(false)
             .default_width(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("导入硬盘控制器驱动"));
                 ui.label(tr!(
                     "将 Intel VMD / Apple SSD / Visior 等硬盘控制器驱动导入到离线系统"
                 ));

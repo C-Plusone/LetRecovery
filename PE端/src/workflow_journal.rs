@@ -21,6 +21,16 @@ pub(crate) struct PeWorkflowJournal {
     journal: OperationJournal,
     support_path: PathBuf,
     data_partition: String,
+    previous_interrupted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecoveryCheckpointSnapshot {
+    pub status: OperationStatus,
+    pub current_step: Option<String>,
+    pub revision: u64,
+    pub previous_interrupted: bool,
+    pub support_bundle_available: bool,
 }
 
 impl PeWorkflowJournal {
@@ -33,11 +43,13 @@ impl PeWorkflowJournal {
         let support_path = root.join(SUPPORT_FILE);
         let now = unix_time_millis();
 
+        let mut previous_interrupted = false;
         if let Some(mut previous) = OperationJournal::open(store.clone())? {
             if !matches!(
                 previous.checkpoint().status,
                 OperationStatus::Succeeded | OperationStatus::Cancelled
             ) {
+                previous_interrupted = true;
                 previous.mark_interrupted(now)?;
                 write_support_bundle(
                     previous.checkpoint(),
@@ -61,6 +73,7 @@ impl PeWorkflowJournal {
             journal,
             support_path,
             data_partition,
+            previous_interrupted,
         }))
     }
 
@@ -91,6 +104,24 @@ impl PeWorkflowJournal {
     pub(crate) fn complete(&mut self) -> Result<(), OperationError> {
         self.journal.complete(unix_time_millis())?;
         self.journal.remove()
+    }
+
+    pub(crate) fn recovery_snapshot(&self) -> RecoveryCheckpointSnapshot {
+        let checkpoint = self.journal.checkpoint();
+        let current_step = checkpoint.current_step.as_ref().and_then(|step_id| {
+            checkpoint
+                .steps
+                .iter()
+                .find(|step| &step.id == step_id)
+                .map(|step| step.name.clone())
+        });
+        RecoveryCheckpointSnapshot {
+            status: checkpoint.status,
+            current_step,
+            revision: checkpoint.revision,
+            previous_interrupted: self.previous_interrupted,
+            support_bundle_available: self.support_path.is_file(),
+        }
     }
 }
 

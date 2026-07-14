@@ -31,6 +31,7 @@ impl App {
             .default_width(600.0)
             .default_height(500.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("英伟达显卡驱动卸载"));
                 ui.label(tr!("此工具用于卸载系统中的英伟达(NVIDIA)显卡驱动"));
                 ui.add_space(10.0);
 

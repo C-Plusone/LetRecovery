@@ -15,7 +15,9 @@ use std::ffi::{c_void, OsStr};
 use std::os::windows::ffi::OsStrExt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 use libloading::Library;
 
@@ -37,12 +39,16 @@ const WIM_OPEN_ALWAYS: u32 = 4;
 // 压缩类型（与 wimlib 取值一致：NONE=0 / XPRESS=1 / LZX=2 / LZMS=3）
 // 由调用方以 u32 传入，直接作为 dwCompressionType。
 
-// 消息常量：WIM_MSG = WM_APP = 0x8000
-const WIM_MSG: u32 = 0x8000;
+// 消息常量严格对照 wimgapi.h：WIM_MSG = WM_APP + 0x1476。
+const WIM_MSG: u32 = 0x8000 + 0x1476;
 /// 进度消息：wParam = 完成百分比(0-100)，lParam = 预计剩余毫秒
 const WIM_MSG_PROGRESS: u32 = WIM_MSG + 2;
+/// 文件/目录处理消息；微软文档要求仅在此消息中返回 WIM_MSG_ABORT_IMAGE。
+const WIM_MSG_PROCESS: u32 = WIM_MSG + 3;
 /// 回调返回 ERROR_SUCCESS(0) 表示继续
 const WIM_MSG_SUCCESS: u32 = 0;
+/// 取消整个 apply/capture 操作。
+const WIM_MSG_ABORT_IMAGE: u32 = 0xFFFF_FFFF;
 /// WIMRegisterMessageCallback 失败返回值
 const INVALID_CALLBACK_VALUE: u32 = 0xFFFF_FFFF;
 
@@ -107,6 +113,7 @@ struct ProgressCtx {
     tx: Option<Sender<WimProgress>>,
     last: u8,
     status_prefix: &'static str,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 unsafe extern "system" fn message_callback(
@@ -115,9 +122,20 @@ unsafe extern "system" fn message_callback(
     _lparam: isize,
     ctx: *mut c_void,
 ) -> DWORD {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if msg == WIM_MSG_PROGRESS && !ctx.is_null() {
-            let state = &mut *(ctx as *mut ProgressCtx);
+    if ctx.is_null() {
+        return WIM_MSG_SUCCESS;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let state = &mut *(ctx as *mut ProgressCtx);
+        if msg == WIM_MSG_PROCESS
+            && state
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        {
+            return WIM_MSG_ABORT_IMAGE;
+        }
+        if msg == WIM_MSG_PROGRESS {
             let percent = (wparam as u32).min(100) as u8;
             if percent != state.last {
                 state.last = percent;
@@ -129,8 +147,9 @@ unsafe extern "system" fn message_callback(
                 }
             }
         }
-    }));
-    WIM_MSG_SUCCESS
+        WIM_MSG_SUCCESS
+    }))
+    .unwrap_or(WIM_MSG_ABORT_IMAGE)
 }
 
 // ============================================================================
@@ -208,6 +227,24 @@ impl WimgapiManager {
         index: u32,
         progress_tx: Option<Sender<WimProgress>>,
     ) -> Result<(), String> {
+        self.apply_image_cancellable(image_file, target_dir, index, progress_tx, None)
+    }
+
+    /// 释放/应用镜像，并按微软 WIMGAPI 约定在 WIM_MSG_PROCESS 回调中协作取消。
+    pub fn apply_image_cancellable(
+        &self,
+        image_file: &str,
+        target_dir: &str,
+        index: u32,
+        progress_tx: Option<Sender<WimProgress>>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<(), String> {
+        if cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        {
+            return Err("WIM operation cancelled".to_owned());
+        }
         let wpath = to_wide(image_file);
         let mut disp: DWORD = 0;
         let h_wim = unsafe {
@@ -231,6 +268,7 @@ impl WimgapiManager {
                 tx: progress_tx,
                 last: 255,
                 status_prefix: "释放镜像中",
+                cancel: cancel.clone(),
             });
             let cb_ok = unsafe {
                 (self.register_cb)(
@@ -246,7 +284,12 @@ impl WimgapiManager {
             } else {
                 let wtarget = to_wide(target_dir);
                 let ok = unsafe { (self.apply_image_fn)(h_img, wtarget.as_ptr(), 0) } != 0;
-                let r = if ok {
+                let r = if cancel
+                    .as_ref()
+                    .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+                {
+                    Err("WIM operation cancelled".to_owned())
+                } else if ok {
                     Ok(())
                 } else {
                     Err(last_err("WIMApplyImage 失败"))
@@ -306,6 +349,7 @@ impl WimgapiManager {
                 tx: progress_tx,
                 last: 255,
                 status_prefix: "备份镜像中",
+                cancel: None,
             });
             let cb_ok = unsafe {
                 (self.register_cb)(
@@ -364,5 +408,43 @@ impl WimgapiManager {
         } else {
             Err(last_err("WIMSetImageInformation 失败"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_ids_match_the_windows_sdk_contract() {
+        assert_eq!(WIM_MSG_PROGRESS, 0x9478);
+        assert_eq!(WIM_MSG_PROCESS, 0x9479);
+        assert_eq!(WIM_MSG_ABORT_IMAGE, u32::MAX);
+    }
+
+    #[test]
+    fn cancellation_aborts_only_from_the_process_callback() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut context = ProgressCtx {
+            tx: None,
+            last: 255,
+            status_prefix: "test",
+            cancel: Some(Arc::clone(&cancel)),
+        };
+        let context_ptr = (&mut context as *mut ProgressCtx).cast::<c_void>();
+
+        assert_eq!(
+            unsafe { message_callback(WIM_MSG_PROCESS, 0, 0, context_ptr) },
+            WIM_MSG_SUCCESS
+        );
+        cancel.store(true, Ordering::SeqCst);
+        assert_eq!(
+            unsafe { message_callback(WIM_MSG_PROGRESS, 1, 0, context_ptr) },
+            WIM_MSG_SUCCESS
+        );
+        assert_eq!(
+            unsafe { message_callback(WIM_MSG_PROCESS, 0, 0, context_ptr) },
+            WIM_MSG_ABORT_IMAGE
+        );
     }
 }

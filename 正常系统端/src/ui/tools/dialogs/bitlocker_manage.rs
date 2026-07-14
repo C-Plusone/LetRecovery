@@ -34,6 +34,7 @@ impl App {
             .default_width(560.0)
             .default_height(420.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("BitLocker管理"));
                 ui.label(tr!("管理本机 BitLocker 加密分区：解锁已锁定的分区，或彻底关闭（解密）已解锁的分区。"));
                 ui.add_space(10.0);
 

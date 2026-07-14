@@ -17,6 +17,7 @@ impl App {
             .default_width(500.0)
             .default_height(400.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("本机网络信息"));
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if let Some(ref adapters) = self.network_info_cache {
                         if adapters.is_empty() {

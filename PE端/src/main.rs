@@ -2,6 +2,8 @@
 
 mod app;
 mod core;
+#[cfg(target_os = "windows")]
+pub mod native_ui;
 mod ui;
 mod utils;
 mod workflow_journal;
@@ -197,7 +199,48 @@ fn main() -> eframe::Result<()> {
         }
     }
 
-    log::info!("初始化 GUI...");
+    // Explicit staged routes keep the legacy renderer as a safe fallback. The P3 native progress
+    // window creates its shared WorkflowSession only after every HWND exists, so a construction
+    // error can fall back here without ever starting a second worker.
+    match native_ui::state::UiBackendRoute::from_args(&args) {
+        native_ui::state::UiBackendRoute::NativeProgress => {
+            if let Some(operation_type) = core::config::ConfigFileManager::detect_operation_type() {
+                log::info!("进入 PE 原生 P3 进度界面");
+                match native_ui::progress::run(operation_type) {
+                    Ok(()) => return Ok(()),
+                    Err(error) if error.safe_to_fallback() => {
+                        log::error!("PE 原生进度窗口启动前失败，回退兼容进度界面: {error}");
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "PE 原生进度窗口消息循环在任务启动后失败，禁止重复启动兼容工作线程: {error}"
+                        );
+                        return Ok(());
+                    }
+                }
+            } else {
+                log::warn!("原生进度路由未检测到任务，回退兼容进度界面");
+            }
+        }
+        native_ui::state::UiBackendRoute::NativeShellPreview => {
+            let workflow = native_ui::state::WorkflowKind::from(
+                core::config::ConfigFileManager::detect_operation_type(),
+            );
+            log::info!("进入 PE 原生窗口 P2 分阶段预览，关闭后继续兼容进度界面");
+            if let Err(error) = native_ui::window::run_shell_preview(workflow) {
+                log::error!("PE 原生窗口初始化失败，回退兼容进度界面: {error}");
+            }
+        }
+        native_ui::state::UiBackendRoute::LegacyProgress => {}
+    }
+
+    run_legacy_progress_ui()
+}
+
+/// Existing progress renderer retained as the explicit compatibility route until P3 migrates the
+/// install, backup and expand progress pages together with their worker message ownership.
+fn run_legacy_progress_ui() -> eframe::Result<()> {
+    log::info!("初始化兼容 GUI 进度界面...");
 
     // 加载图标
     let icon = load_icon();

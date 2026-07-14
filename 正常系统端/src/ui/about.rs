@@ -12,31 +12,16 @@ impl App {
         egui::ScrollArea::vertical()
             .max_height(available_height)
             .show(ui, |ui| {
-                ui.heading(tr!("关于 LetRecovery"));
-                ui.separator();
+                crate::ui::inno_theme::scope(ui, |ui| {
+                    ui.heading(tr!("语言设置"));
+                    ui.add_space(8.0);
 
-                ui.add_space(20.0);
+                    // 获取可用语言列表
+                    let available_languages = i18n::get_available_languages();
+                    let current_language = self.app_config.language.clone();
 
-                // 版本信息（编译时按日期自动生成，见 build.rs）
-                ui.horizontal(|ui| {
-                    ui.label(tr!("版本:"));
-                    ui.strong(env!("BUILD_VERSION"));
-                });
-
-                ui.add_space(15.0);
-
-                // 语言设置
-                ui.separator();
-                ui.add_space(10.0);
-                ui.heading(tr!("语言设置"));
-                ui.add_space(10.0);
-
-                // 获取可用语言列表
-                let available_languages = i18n::get_available_languages();
-                let current_language = self.app_config.language.clone();
-
-                ui.horizontal(|ui| {
-                    ui.label(tr!("界面语言:"));
+                    ui.horizontal(|ui| {
+                        ui.label(tr!("界面语言:"));
 
                     // 查找当前语言的显示名称
                     let current_display = available_languages
@@ -76,23 +61,30 @@ impl App {
                         });
 
                     // 刷新语言列表按钮
-                    if ui.button(tr!("刷新")).on_hover_text(tr!("刷新语言列表")).clicked() {
-                        i18n::refresh_available_languages();
+                        if crate::ui::inno_components::secondary_button(ui, tr!("刷新"))
+                            .on_hover_text(tr!("刷新语言列表"))
+                            .clicked()
+                        {
+                            i18n::refresh_available_languages();
+                        }
+                    });
+
+                    // 显示当前语言作者信息
+                    if let Some(lang_info) = available_languages
+                        .iter()
+                        .find(|l| l.code == current_language)
+                    {
+                        if lang_info.code != "zh-CN" {
+                            ui.add_space(5.0);
+                            ui.indent("lang_author", |ui| {
+                                ui.colored_label(
+                                    egui::Color32::GRAY,
+                                    format!("{}: {}", tr!("翻译作者"), lang_info.author),
+                                );
+                            });
+                        }
                     }
                 });
-
-                // 显示当前语言作者信息
-                if let Some(lang_info) = available_languages.iter().find(|l| l.code == current_language) {
-                    if lang_info.code != "zh-CN" {
-                        ui.add_space(5.0);
-                        ui.indent("lang_author", |ui| {
-                            ui.colored_label(
-                                egui::Color32::GRAY,
-                                format!("{}: {}", tr!("翻译作者"), lang_info.author),
-                            );
-                        });
-                    }
-                }
 
                 ui.add_space(10.0);
                 ui.separator();

@@ -23,6 +23,7 @@ impl App {
             .default_width(550.0)
             .default_height(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("移除APPX应用"));
                 if is_pe {
                     ui.label(tr!("移除离线系统中预装的 Microsoft Store 应用"));
                 } else {

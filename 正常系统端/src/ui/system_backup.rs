@@ -1,4 +1,5 @@
 use egui;
+use egui_extras::{Column, TableBuilder};
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -11,9 +12,6 @@ use crate::ui::pe_preparation::PePreparationOutcome;
 
 impl App {
     pub fn show_system_backup(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("系统备份"));
-        ui.separator();
-
         // 整页套一层垂直滚动：窗口调小时也能滚动到底部的「开始备份」按钮等控件。
         egui::ScrollArea::vertical()
             .id_salt("system_backup_page_scroll")
@@ -36,83 +34,96 @@ impl App {
                 // 选择要备份的分区
                 ui.label(tr!("选择要备份的分区:"));
 
-                egui::ScrollArea::vertical()
-                    .max_height(150.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("backup_partition_grid")
-                            .striped(true)
-                            .min_col_width(80.0)
-                            .show(ui, |ui| {
-                                ui.label(tr!("分区卷"));
-                                ui.label(tr!("总空间"));
-                                ui.label(tr!("已用空间"));
-                                ui.label(tr!("卷标"));
-                                ui.label("BitLocker");
-                                ui.label(tr!("状态"));
-                                ui.end_row();
-
-                                for (i, partition) in self.partitions.iter().enumerate() {
-                                    let used_size =
-                                        partition.total_size_mb - partition.free_size_mb;
-
-                                    let label = if is_pe {
-                                        if partition.has_windows {
-                                            tr!("{} (有系统)", partition.letter)
-                                        } else {
-                                            partition.letter.clone()
-                                        }
-                                    } else if partition.is_system_partition {
-                                        tr!("{} (当前系统)", partition.letter)
-                                    } else if partition.has_windows {
-                                        tr!("{} (有系统)", partition.letter)
-                                    } else {
-                                        partition.letter.clone()
-                                    };
-
-                                    if ui
-                                        .selectable_label(
-                                            self.backup_source_partition == Some(i),
-                                            &label,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.backup_source_partition = Some(i);
-                                    }
-
-                                    ui.label(Self::format_size(partition.total_size_mb));
-                                    ui.label(Self::format_size(used_size));
-                                    ui.label(&partition.label);
-
-                                    // 显示 BitLocker 状态
-                                    let status_color = match partition.bitlocker_status {
-                                        crate::core::bitlocker::VolumeStatus::EncryptedLocked => {
-                                            egui::Color32::RED
-                                        }
-                                        crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => {
-                                            egui::Color32::from_rgb(102, 187, 106)
-                                        }
-                                        crate::core::bitlocker::VolumeStatus::Encrypting
-                                        | crate::core::bitlocker::VolumeStatus::Decrypting => {
-                                            crate::ui::activity_text_color(ui.visuals().dark_mode)
-                                        }
-                                        _ => ui.visuals().text_color(),
-                                    };
-                                    ui.colored_label(
-                                        status_color,
-                                        tr!(partition.bitlocker_status.as_str()),
-                                    );
-
-                                    let status = if partition.has_windows {
-                                        tr!("有系统")
-                                    } else {
-                                        tr!("无系统")
-                                    };
-                                    ui.label(status);
-
-                                    ui.end_row();
-                                }
+                let partitions_clone = self.partitions.clone();
+                let mut selected_partition = None;
+                TableBuilder::new(ui)
+                    .id_salt("backup_partition_table")
+                    .striped(true)
+                    .resizable(false)
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .max_scroll_height(145.0)
+                    .column(Column::auto().at_least(100.0))
+                    .column(Column::auto().at_least(72.0))
+                    .column(Column::auto().at_least(72.0))
+                    .column(Column::auto().at_least(70.0))
+                    .column(Column::auto().at_least(78.0))
+                    .column(Column::remainder().at_least(60.0))
+                    .header(24.0, |mut header| {
+                        for text in [
+                            tr!("分区卷"),
+                            tr!("总空间"),
+                            tr!("已用空间"),
+                            tr!("卷标"),
+                            "BitLocker".to_owned(),
+                            tr!("状态"),
+                        ] {
+                            header.col(|ui| {
+                                ui.strong(text);
                             });
+                        }
+                    })
+                    .body(|body| {
+                        body.rows(25.0, partitions_clone.len(), |mut row| {
+                            let i = row.index();
+                            let partition = &partitions_clone[i];
+                            row.set_selected(self.backup_source_partition == Some(i));
+                            let used_size = partition.total_size_mb - partition.free_size_mb;
+                            let label = if is_pe {
+                                if partition.has_windows {
+                                    tr!("{} (有系统)", partition.letter)
+                                } else {
+                                    partition.letter.clone()
+                                }
+                            } else if partition.is_system_partition {
+                                tr!("{} (当前系统)", partition.letter)
+                            } else if partition.has_windows {
+                                tr!("{} (有系统)", partition.letter)
+                            } else {
+                                partition.letter.clone()
+                            };
+                            row.col(|ui| {
+                                ui.label(label);
+                            });
+                            row.col(|ui| {
+                                ui.label(Self::format_size(partition.total_size_mb));
+                            });
+                            row.col(|ui| {
+                                ui.label(Self::format_size(used_size));
+                            });
+                            row.col(|ui| {
+                                ui.label(&partition.label);
+                            });
+                            row.col(|ui| {
+                                let color = match partition.bitlocker_status {
+                                    crate::core::bitlocker::VolumeStatus::EncryptedLocked => {
+                                        egui::Color32::RED
+                                    }
+                                    crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => {
+                                        egui::Color32::from_rgb(102, 187, 106)
+                                    }
+                                    crate::core::bitlocker::VolumeStatus::Encrypting
+                                    | crate::core::bitlocker::VolumeStatus::Decrypting => {
+                                        crate::ui::activity_text_color(ui.visuals().dark_mode)
+                                    }
+                                    _ => ui.visuals().text_color(),
+                                };
+                                ui.colored_label(color, tr!(partition.bitlocker_status.as_str()));
+                            });
+                            row.col(|ui| {
+                                ui.label(if partition.has_windows {
+                                    tr!("有系统")
+                                } else {
+                                    tr!("无系统")
+                                });
+                            });
+                            if row.response().clicked() {
+                                selected_partition = Some(i);
+                            }
+                        });
                     });
+                if let Some(i) = selected_partition {
+                    self.backup_source_partition = Some(i);
+                }
 
                 ui.add_space(15.0);
                 ui.separator();
@@ -282,35 +293,13 @@ impl App {
                     );
                 }
 
-                ui.add_space(20.0);
-
-                // 开始备份按钮
                 let can_backup = self.backup_source_partition.is_some()
                     && !self.backup_save_path.is_empty()
                     && !self.backup_name.is_empty()
                     && !backup_blocked
                     && (!show_pe_selector || self.selected_pe_for_backup.is_some());
 
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            can_backup && !self.is_backing_up,
-                            egui::Button::new(tr!("开始备份")).min_size(egui::vec2(120.0, 35.0)),
-                        )
-                        .clicked()
-                    {
-                        self.start_backup();
-                    }
-
-                    // 显示备份模式提示
-                    if can_backup {
-                        if needs_pe && !is_pe {
-                            ui.label(tr!("(将通过PE环境备份)"));
-                        } else {
-                            ui.label(tr!("(直接备份)"));
-                        }
-                    }
-                });
+                ui.add_space(8.0);
 
                 // 备份进度
                 if self.is_backing_up {
@@ -437,6 +426,24 @@ impl App {
         }
 
         locked_partitions
+    }
+
+    pub(crate) fn show_system_backup_command(&mut self, ui: &mut egui::Ui) {
+        let is_pe = self.is_pe_environment();
+        let needs_pe = self.check_if_needs_pe_for_backup();
+        let show_pe_selector = !is_pe && needs_pe;
+        let backup_blocked = show_pe_selector && !self.is_pe_config_available();
+        let can_backup = self.backup_source_partition.is_some()
+            && !self.backup_save_path.is_empty()
+            && !self.backup_name.is_empty()
+            && !backup_blocked
+            && (!show_pe_selector || self.selected_pe_for_backup.is_some());
+
+        ui.add_enabled_ui(can_backup && !self.is_backing_up, |ui| {
+            if crate::ui::inno_components::primary_button(ui, tr!("开始备份")).clicked() {
+                self.start_backup();
+            }
+        });
     }
 
     fn start_backup(&mut self) {
@@ -810,16 +817,10 @@ impl App {
 
     /// 显示备份进度页面
     pub fn show_backup_progress(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("备份进度"));
-        ui.separator();
-
         self.update_backup_progress();
 
         if !self.is_backing_up && self.backup_progress < 100 {
             ui.label(tr!("没有正在进行的备份任务"));
-            if ui.button(tr!("返回")).clicked() {
-                self.current_panel = Panel::SystemBackup;
-            }
             return;
         }
 
@@ -850,10 +851,6 @@ impl App {
             match self.backup_mode {
                 BackupMode::Direct => {
                     ui.colored_label(egui::Color32::from_rgb(102, 187, 106), tr!("备份完成！"));
-                    ui.add_space(10.0);
-                    if ui.button(tr!("返回")).clicked() {
-                        self.current_panel = Panel::SystemBackup;
-                    }
                 }
                 BackupMode::ViaPE => {
                     ui.colored_label(
@@ -861,26 +858,36 @@ impl App {
                         tr!("PE环境准备完成！"),
                     );
                     ui.label(tr!("系统将重启进入PE环境继续备份。"));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(tr!("立即重启")).clicked() {
-                            let _ = crate::utils::cmd::create_command("shutdown")
-                                .args([
-                                    "/r",
-                                    "/t",
-                                    "5",
-                                    "/c",
-                                    "LetRecovery 即将重启到PE环境进行备份...",
-                                ])
-                                .spawn();
-                        }
-                        if ui.button(tr!("稍后重启")).clicked() {
-                            self.current_panel = Panel::SystemBackup;
-                        }
-                    });
                 }
             }
-        } else if self.is_backing_up && ui.button(tr!("取消备份")).clicked() {
+        }
+    }
+
+    pub(crate) fn show_backup_progress_command(&mut self, ui: &mut egui::Ui) {
+        if !self.is_backing_up && self.backup_progress < 100 {
+            if crate::ui::inno_components::secondary_button(ui, tr!("返回")).clicked() {
+                self.current_panel = Panel::SystemBackup;
+            }
+        } else if self.backup_progress >= 100 {
+            if self.backup_mode == BackupMode::ViaPE {
+                if crate::ui::inno_components::secondary_button(ui, tr!("稍后重启")).clicked() {
+                    self.current_panel = Panel::SystemBackup;
+                }
+                if crate::ui::inno_components::primary_button(ui, tr!("立即重启")).clicked() {
+                    let _ = crate::utils::cmd::create_command("shutdown")
+                        .args([
+                            "/r",
+                            "/t",
+                            "5",
+                            "/c",
+                            "LetRecovery 即将重启到PE环境进行备份...",
+                        ])
+                        .spawn();
+                }
+            } else if crate::ui::inno_components::secondary_button(ui, tr!("返回")).clicked() {
+                self.current_panel = Panel::SystemBackup;
+            }
+        } else if crate::ui::inno_components::secondary_button(ui, tr!("取消")).clicked() {
             log::info!("[BACKUP] 用户取消备份");
             self.is_backing_up = false;
             self.current_panel = Panel::SystemBackup;

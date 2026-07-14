@@ -53,7 +53,7 @@ fn execute_diskpart_checked(program: &str, prefix: &str, script: &str) -> Result
 pub const AUTO_CREATED_PARTITION_MARKER: &str = "LetRecovery_AutoCreated.marker";
 
 /// 分区表类型
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 // Keep the established names because they are shown verbatim throughout both endpoints.
 #[allow(clippy::upper_case_acronyms)]
 pub enum PartitionStyle {

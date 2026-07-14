@@ -21,8 +21,8 @@ use serde::Deserialize;
 use crate::core::disk::DiskManager;
 use crate::core::install_config::{ConfigFileManager, InstallConfig};
 use crate::core::pe::PeManager;
+use crate::core::ui_state::AdvancedOptionsData;
 use crate::tr;
-use crate::ui::advanced_options::AdvancedOptions;
 
 fn default_volume_index() -> u32 {
     1
@@ -80,13 +80,13 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
     };
 
     // 2) 高级选项（可选）
-    let advanced: AdvancedOptions = match advanced_path {
+    let advanced: AdvancedOptionsData = match advanced_path {
         Some(p) => {
             let text =
                 std::fs::read_to_string(p).with_context(|| tr!("读取高级选项失败: {}", p))?;
             serde_json::from_str(&text).with_context(|| tr!("解析高级选项 JSON 失败: {}", p))?
         }
-        None => AdvancedOptions::default(),
+        None => AdvancedOptionsData::default(),
     };
 
     // 3) 校验

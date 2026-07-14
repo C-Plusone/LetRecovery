@@ -29,6 +29,7 @@ impl App {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("BitLocker解锁 - 备份"));
                 ui.set_min_width(500.0);
 
                 ui.label(tr!(

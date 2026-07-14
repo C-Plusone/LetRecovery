@@ -147,6 +147,7 @@ impl App {
             .default_width(520.0)
             .min_width(460.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("无损扩大C盘"));
                 // 加载中
                 if self.expand_c_state.loading {
                     ui.vertical_centered(|ui| {

@@ -39,6 +39,7 @@ impl App {
             .default_width(560.0)
             .default_height(380.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("密码重置"));
                 ui.label(tr!("清除 Windows 本地账户的密码（等效空密码），并启用被禁用的账户。"));
                 ui.colored_label(
                     crate::ui::warning_text_color(ui.visuals().dark_mode),

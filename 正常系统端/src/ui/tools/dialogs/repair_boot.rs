@@ -21,6 +21,7 @@ impl App {
             .resizable(false)
             .default_width(450.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("一键修复引导"));
                 ui.label(tr!("修复Windows系统的启动引导"));
                 ui.add_space(10.0);
 

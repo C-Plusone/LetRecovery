@@ -19,8 +19,9 @@ use std::os::windows::ffi::OsStrExt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 use libloading::Library;
 
@@ -354,9 +355,20 @@ struct ProgressCtx {
     tx: Option<Sender<WimProgress>>,
     last: u8,
     status_prefix: &'static str,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 unsafe extern "C" fn progress_callback(msg: c_int, info: *const c_void, ctx: *mut c_void) -> c_int {
+    if !ctx.is_null() {
+        let state = &*(ctx as *const ProgressCtx);
+        if state
+            .cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        {
+            return WIMLIB_PROGRESS_STATUS_ABORT;
+        }
+    }
     let result = catch_unwind(AssertUnwindSafe(|| {
         if ctx.is_null() || info.is_null() {
             return;
@@ -393,6 +405,10 @@ unsafe extern "C" fn progress_callback(msg: c_int, info: *const c_void, ctx: *mu
     }
 }
 
+struct VerifyProgressCtx {
+    cancel: Option<Arc<AtomicBool>>,
+}
+
 /// iterate_dir_tree 用的空回调（只关心路径是否存在，由返回码判断）
 unsafe extern "C" fn noop_iterate_cb(_dentry: *const c_void, _ctx: *mut c_void) -> c_int {
     0
@@ -402,8 +418,18 @@ unsafe extern "C" fn noop_iterate_cb(_dentry: *const c_void, _ctx: *mut c_void) 
 unsafe extern "C" fn verify_progress_callback(
     msg: c_int,
     info: *const c_void,
-    _ctx: *mut c_void,
+    ctx: *mut c_void,
 ) -> c_int {
+    if !ctx.is_null() {
+        let state = &*(ctx as *const VerifyProgressCtx);
+        if state
+            .cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        {
+            return WIMLIB_PROGRESS_STATUS_ABORT;
+        }
+    }
     let result = catch_unwind(AssertUnwindSafe(|| {
         if info.is_null() {
             return;
@@ -550,9 +576,18 @@ impl Wimlib {
     }
 
     pub fn open_wim(&self, path: &str) -> Result<WimHandle<'_>, String> {
+        self.open_wim_cancellable(path, None)
+    }
+
+    pub fn open_wim_cancellable(
+        &self,
+        path: &str,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<WimHandle<'_>, String> {
         VERIFY_GLOBAL_PROGRESS.store(0, Ordering::SeqCst);
         let wpath = to_wide(path);
         let mut wim: WIMStruct = null_mut();
+        let mut progress_ctx = Box::new(VerifyProgressCtx { cancel });
         // 注册校验进度回调（用于后续 verify 的进度上报）
         let rc = unsafe {
             (self.open_wim)(
@@ -560,7 +595,7 @@ impl Wimlib {
                 0,
                 &mut wim,
                 Some(verify_progress_callback),
-                null_mut(),
+                &mut *progress_ctx as *mut VerifyProgressCtx as *mut c_void,
             )
         };
         if rc != WIMLIB_ERR_SUCCESS {
@@ -569,7 +604,11 @@ impl Wimlib {
         if wim.is_null() {
             return Err("打开 WIM 失败：返回空句柄".to_string());
         }
-        Ok(WimHandle { wim, lib: self })
+        Ok(WimHandle {
+            wim,
+            lib: self,
+            _progress_ctx: progress_ctx,
+        })
     }
 
     /// 当前完整性校验进度（0-100）
@@ -585,6 +624,7 @@ impl Wimlib {
 pub struct WimHandle<'a> {
     wim: WIMStruct,
     lib: &'a Wimlib,
+    _progress_ctx: Box<VerifyProgressCtx>,
 }
 
 impl<'a> WimHandle<'a> {
@@ -776,6 +816,23 @@ impl WimlibManager {
         index: u32,
         progress_tx: Option<Sender<WimProgress>>,
     ) -> Result<(), String> {
+        self.apply_image_cancellable(image_file, target_dir, index, progress_tx, None)
+    }
+
+    pub fn apply_image_cancellable(
+        &self,
+        image_file: &str,
+        target_dir: &str,
+        index: u32,
+        progress_tx: Option<Sender<WimProgress>>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<(), String> {
+        if cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        {
+            return Err("操作已取消".to_owned());
+        }
         let wim = self.open(image_file)?;
         let _prio = HighPriorityGuard::new();
 
@@ -784,6 +841,7 @@ impl WimlibManager {
             tx: progress_tx,
             last: 255,
             status_prefix: "释放镜像中",
+            cancel,
         });
         unsafe {
             (self.register_progress)(
@@ -871,6 +929,7 @@ impl WimlibManager {
             tx: progress_tx,
             last: 255,
             status_prefix: "备份镜像中",
+            cancel: None,
         });
         unsafe {
             (self.register_progress)(
@@ -1160,4 +1219,44 @@ fn decode_utf16le(data: &[u8]) -> String {
         units.pop();
     }
     String::from_utf16_lossy(&units)
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn apply_progress_callback_aborts_when_cancelled_even_without_progress_info() {
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut context = ProgressCtx {
+            tx: None,
+            last: 255,
+            status_prefix: "test",
+            cancel: Some(cancel),
+        };
+        let status = unsafe {
+            progress_callback(
+                progress_msg::EXTRACT_STREAMS,
+                std::ptr::null(),
+                &mut context as *mut ProgressCtx as *mut c_void,
+            )
+        };
+        assert_eq!(status, WIMLIB_PROGRESS_STATUS_ABORT);
+    }
+
+    #[test]
+    fn verify_progress_callback_aborts_when_cancelled_even_without_progress_info() {
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut context = VerifyProgressCtx {
+            cancel: Some(cancel),
+        };
+        let status = unsafe {
+            verify_progress_callback(
+                progress_msg::VERIFY_STREAMS,
+                std::ptr::null(),
+                &mut context as *mut VerifyProgressCtx as *mut c_void,
+            )
+        };
+        assert_eq!(status, WIMLIB_PROGRESS_STATUS_ABORT);
+    }
 }

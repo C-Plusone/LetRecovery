@@ -21,6 +21,7 @@ impl App {
             .default_width(400.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("系统时间校准"));
                 ui.add_space(6.0);
                 ui.label(tr!("是否立即网络同步本机的时间到北京时间？"));
                 ui.add_space(10.0);

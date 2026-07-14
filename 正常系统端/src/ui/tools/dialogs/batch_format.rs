@@ -22,6 +22,7 @@ impl App {
             .default_width(500.0)
             .default_height(400.0)
             .show(ui.ctx(), |ui| {
+                crate::ui::inno_components::dialog_header(ui, tr!("批量格式化"));
                 ui.label(tr!("选择要格式化的分区（系统盘已自动隐藏）"));
                 ui.add_space(10.0);
 

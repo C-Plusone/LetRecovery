@@ -22,16 +22,10 @@ fn execute_diskpart_script(prefix: &str, script: &str) -> Result<String, String>
 
 impl App {
     pub fn show_install_progress(&mut self, ui: &mut egui::Ui) {
-        ui.heading(tr!("安装进度"));
-        ui.separator();
-
         self.update_install_progress();
 
         if !self.is_installing {
             ui.label(tr!("没有正在进行的安装任务"));
-            if ui.button(tr!("返回")).clicked() {
-                self.current_panel = crate::app::Panel::SystemInstall;
-            }
             return;
         }
 
@@ -140,16 +134,6 @@ impl App {
             match self.install_mode {
                 InstallMode::Direct => {
                     ui.colored_label(egui::Color32::from_rgb(102, 187, 106), tr!("安装完成！"));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(tr!("立即重启")).clicked() {
-                            self.reboot_system();
-                        }
-                        if ui.button(tr!("返回主页")).clicked() {
-                            self.is_installing = false;
-                            self.current_panel = crate::app::Panel::SystemInstall;
-                        }
-                    });
                 }
                 InstallMode::ViaPE => {
                     ui.colored_label(
@@ -157,22 +141,8 @@ impl App {
                         tr!("PE环境准备完成！"),
                     );
                     ui.label(tr!("系统将重启进入PE环境继续安装。"));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(tr!("立即重启")).clicked() {
-                            self.reboot_system();
-                        }
-                        if ui.button(tr!("稍后重启")).clicked() {
-                            self.is_installing = false;
-                            self.current_panel = crate::app::Panel::SystemInstall;
-                        }
-                    });
                 }
             }
-        } else if ui.button(tr!("取消安装")).clicked() {
-            log::info!("[INSTALL] 用户取消安装");
-            self.is_installing = false;
-            self.current_panel = crate::app::Panel::SystemInstall;
         }
 
         // 启动安装线程
@@ -181,6 +151,31 @@ impl App {
                 InstallMode::Direct => self.start_direct_install_thread(),
                 InstallMode::ViaPE => self.start_pe_install_thread(),
             }
+        }
+    }
+
+    pub(crate) fn show_install_progress_command(&mut self, ui: &mut egui::Ui) {
+        if !self.is_installing {
+            if crate::ui::inno_components::secondary_button(ui, tr!("返回")).clicked() {
+                self.current_panel = crate::app::Panel::SystemInstall;
+            }
+        } else if self.install_progress.total_progress >= 100 {
+            let later = if self.install_mode == InstallMode::ViaPE {
+                tr!("稍后重启")
+            } else {
+                tr!("返回主页")
+            };
+            if crate::ui::inno_components::secondary_button(ui, later).clicked() {
+                self.is_installing = false;
+                self.current_panel = crate::app::Panel::SystemInstall;
+            }
+            if crate::ui::inno_components::primary_button(ui, tr!("立即重启")).clicked() {
+                self.reboot_system();
+            }
+        } else if crate::ui::inno_components::secondary_button(ui, tr!("取消")).clicked() {
+            log::info!("[INSTALL] 用户取消安装");
+            self.is_installing = false;
+            self.current_panel = crate::app::Panel::SystemInstall;
         }
     }
 

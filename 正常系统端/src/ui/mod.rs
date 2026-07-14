@@ -4,6 +4,8 @@ pub mod download_progress;
 pub mod easy_mode;
 pub mod embedded_assets;
 pub mod hardware_info;
+pub(crate) mod inno_components;
+pub(crate) mod inno_theme;
 pub mod install_progress;
 pub mod online_download;
 pub(crate) mod pe_preparation;

@@ -33,6 +33,11 @@ impl InstallStep {
         }
     }
 
+    /// 返回当前界面语言下的步骤名称，避免把动态步骤键作为格式参数后漏译。
+    pub fn localized_name(&self) -> String {
+        tr!(self.name())
+    }
+
     pub fn index(&self) -> usize {
         match self {
             InstallStep::VerifyImage => 0,
@@ -91,6 +96,11 @@ impl BackupStep {
         }
     }
 
+    /// 返回当前界面语言下的步骤名称，供 egui 与原生进度页共用。
+    pub fn localized_name(&self) -> String {
+        tr!(self.name())
+    }
+
     pub fn index(&self) -> usize {
         match self {
             BackupStep::ReadConfig => 0,
@@ -138,6 +148,8 @@ pub struct ProgressState {
     pub current_install_step: InstallStep,
     /// 当前备份步骤
     pub current_backup_step: BackupStep,
+    /// Worker 尚未发出首个步骤消息时保持 false，避免首帧显示错误步骤。
+    pub has_current_step: bool,
     /// 当前步骤进度 (0-100)
     pub step_progress: u8,
     /// 总体进度 (0-100)
@@ -157,8 +169,9 @@ impl Default for ProgressState {
         Self {
             is_install_mode: true,
             is_expand_mode: false,
-            current_install_step: InstallStep::FormatPartition,
+            current_install_step: InstallStep::VerifyImage,
             current_backup_step: BackupStep::ReadConfig,
+            has_current_step: false,
             step_progress: 0,
             overall_progress: 0,
             status_message: String::new(),
@@ -195,6 +208,7 @@ impl ProgressState {
     /// 设置当前安装步骤
     pub fn set_install_step(&mut self, step: InstallStep) {
         self.current_install_step = step;
+        self.has_current_step = true;
         self.step_progress = 0;
         self.update_overall_progress();
     }
@@ -202,6 +216,7 @@ impl ProgressState {
     /// 设置当前备份步骤
     pub fn set_backup_step(&mut self, step: BackupStep) {
         self.current_backup_step = step;
+        self.has_current_step = true;
         self.step_progress = 0;
         self.update_overall_progress();
     }
@@ -209,11 +224,19 @@ impl ProgressState {
     /// 更新步骤进度
     pub fn set_step_progress(&mut self, progress: u8) {
         self.step_progress = progress.min(100);
-        self.update_overall_progress();
+        if self.is_expand_mode {
+            self.overall_progress = self.step_progress;
+        } else {
+            self.update_overall_progress();
+        }
     }
 
     /// 更新总体进度
     fn update_overall_progress(&mut self) {
+        if !self.has_current_step {
+            self.overall_progress = 0;
+            return;
+        }
         if self.is_install_mode {
             let step_idx = self.current_install_step.index();
             let total = InstallStep::total();
@@ -234,10 +257,13 @@ impl ProgressState {
         self.is_completed = true;
         self.overall_progress = 100;
         self.step_progress = 100;
-        if self.is_install_mode {
-            self.current_install_step = InstallStep::Complete;
-        } else {
-            self.current_backup_step = BackupStep::Complete;
+        self.has_current_step = !self.is_expand_mode;
+        if !self.is_expand_mode {
+            if self.is_install_mode {
+                self.current_install_step = InstallStep::Complete;
+            } else {
+                self.current_backup_step = BackupStep::Complete;
+            }
         }
     }
 
@@ -271,13 +297,18 @@ impl ProgressUI {
 
             // 当前步骤（扩容模式无步骤列表，跳过）
             if !state.is_expand_mode {
-                let current_step_name = if state.is_install_mode {
-                    state.current_install_step.name()
+                let current_step_text = if !state.has_current_step {
+                    tr!("正在准备操作...")
+                } else if state.is_install_mode {
+                    tr!(
+                        "当前步骤: [{}]",
+                        state.current_install_step.localized_name()
+                    )
                 } else {
-                    state.current_backup_step.name()
+                    tr!("当前步骤: [{}]", state.current_backup_step.localized_name())
                 };
                 ui.label(
-                    RichText::new(tr!("当前步骤: [{}]", current_step_name))
+                    RichText::new(current_step_text)
                         .size(16.0)
                         .color(Color32::from_rgb(100, 180, 255)),
                 );
@@ -373,7 +404,9 @@ impl ProgressUI {
 
         for step in InstallStep::all() {
             let idx = step.index();
-            let status = if state.is_failed && idx == current_idx {
+            let status = if !state.has_current_step {
+                StepStatus::Pending
+            } else if state.is_failed && idx == current_idx {
                 StepStatus::Failed
             } else if idx < current_idx || (idx == current_idx && state.step_progress == 100) {
                 StepStatus::Completed
@@ -383,7 +416,7 @@ impl ProgressUI {
                 StepStatus::Pending
             };
 
-            Self::show_step_item(ui, step.name(), status);
+            Self::show_step_item(ui, &step.localized_name(), status);
         }
     }
 
@@ -393,7 +426,9 @@ impl ProgressUI {
 
         for step in BackupStep::all() {
             let idx = step.index();
-            let status = if state.is_failed && idx == current_idx {
+            let status = if !state.has_current_step {
+                StepStatus::Pending
+            } else if state.is_failed && idx == current_idx {
                 StepStatus::Failed
             } else if idx < current_idx || (idx == current_idx && state.step_progress == 100) {
                 StepStatus::Completed
@@ -403,7 +438,7 @@ impl ProgressUI {
                 StepStatus::Pending
             };
 
-            Self::show_step_item(ui, step.name(), status);
+            Self::show_step_item(ui, &step.localized_name(), status);
         }
     }
 
@@ -421,8 +456,33 @@ impl ProgressUI {
 
             ui.label(RichText::new(icon).size(14.0).color(color).monospace());
             ui.add_space(10.0);
-            ui.label(RichText::new(tr!(name)).size(14.0).color(color));
+            ui.label(RichText::new(name).size(14.0).color(color));
         });
         ui.add_space(5.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackupStep, InstallStep};
+    use crate::utils::i18n::LanguageFile;
+
+    #[test]
+    fn english_catalog_covers_every_dynamic_progress_step() {
+        let catalog: LanguageFile =
+            serde_json::from_str(include_str!("../../../assets/release/lang/en-US.json"))
+                .expect("embedded en-US catalog must be valid JSON");
+
+        for key in InstallStep::all()
+            .into_iter()
+            .map(|step| step.name())
+            .chain(BackupStep::all().into_iter().map(|step| step.name()))
+        {
+            let translation = catalog
+                .data
+                .get(key)
+                .unwrap_or_else(|| panic!("missing en-US progress step translation: {key}"));
+            assert_ne!(translation, key, "progress step must not remain Chinese");
+        }
     }
 }

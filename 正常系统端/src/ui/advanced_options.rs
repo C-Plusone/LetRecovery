@@ -3,6 +3,7 @@ use walkdir::WalkDir;
 
 use crate::core::hardware_info::HardwareInfo;
 use crate::core::registry::OfflineRegistry;
+#[cfg(any())]
 use crate::tr;
 use std::path::PathBuf;
 
@@ -144,6 +145,7 @@ impl AdvancedOptions {
 
     /// 显示依赖无人值守的复选框
     /// 如果无人值守被禁用，该复选框也会被禁用并显示提示
+    #[cfg(any())]
     fn show_unattend_dependent_checkbox(
         ui: &mut egui::Ui,
         value: &mut bool,
@@ -1545,6 +1547,7 @@ Write-Host "UWP应用清理完成"
     /// - `is_win7`: 当前选择的镜像是否为 Windows 7
     /// - `is_xp`: 当前选择的镜像是否为 Windows XP/2003
     /// - `is_uefi_mode`: 当前安装模式是否为 UEFI
+    #[cfg(any())]
     pub fn show_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1987,6 +1990,7 @@ Write-Host "UWP应用清理完成"
     }
 }
 
+#[cfg(any())]
 use egui;
 
 fn detect_computer_model_name(hardware_info: Option<&HardwareInfo>) -> Option<String> {
