@@ -95,6 +95,17 @@ pub(crate) const fn controls_use_mica(backdrop_available: bool, window_active: b
     backdrop_available && window_active
 }
 
+/// A full-client material exists only while it was requested, the current endpoint supports DWM
+/// Mica, and this exact top-level window is active. Inactive windows deliberately execute the
+/// same AUTO/zero-frame path as an explicitly disabled Mica setting.
+pub(crate) const fn mica_session_enabled(
+    requested: bool,
+    endpoint_supports_mica: bool,
+    window_active: bool,
+) -> bool {
+    requested && endpoint_supports_mica && window_active
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +122,13 @@ mod tests {
         assert!(!controls_use_mica(true, false));
         assert!(!controls_use_mica(false, true));
         assert!(!controls_use_mica(false, false));
+    }
+
+    #[test]
+    fn a_mica_session_requires_request_endpoint_support_and_window_activation() {
+        assert!(mica_session_enabled(true, true, true));
+        assert!(!mica_session_enabled(false, true, true));
+        assert!(!mica_session_enabled(true, false, true));
+        assert!(!mica_session_enabled(true, true, false));
     }
 }

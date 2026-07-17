@@ -323,7 +323,11 @@ impl DialogState {
         let base = Palette::system();
         let requested = AppConfig::load().experimental_window_backdrop;
         let endpoint_supports_mica = !crate::core::disk::DiskManager::is_pe_environment();
-        let enabled = requested == ExperimentalWindowBackdrop::Mica && endpoint_supports_mica;
+        let enabled = backdrop::mica_session_enabled(
+            requested == ExperimentalWindowBackdrop::Mica,
+            endpoint_supports_mica,
+            self.window_active,
+        );
         self.backdrop_active = match backdrop::apply_mica(self.hwnd, enabled) {
             Ok(active) => active,
             Err(error) => {

@@ -2459,7 +2459,11 @@ impl NativeWindow {
         // The normal executable can be used as a diagnostic fallback in reduced environments.
         // Never request a DWM material from WinPE even if a desktop config.json was copied in.
         let endpoint_supports_mica = !crate::core::disk::DiskManager::is_pe_environment();
-        let enabled = requested == ExperimentalWindowBackdrop::Mica && endpoint_supports_mica;
+        let enabled = backdrop::mica_session_enabled(
+            requested == ExperimentalWindowBackdrop::Mica,
+            endpoint_supports_mica,
+            self.window_active,
+        );
         match backdrop::apply_mica(hwnd, enabled) {
             Ok(active) => self.backdrop_active = active,
             Err(error) => {
@@ -2484,10 +2488,11 @@ impl NativeWindow {
 
     unsafe fn refresh_window_activation(&mut self, hwnd: HWND, active: bool) {
         self.window_active = active;
-        // DWM switches an inactive Mica top-level window to a neutral fallback. Publish the
-        // matching ordinary child-control palette in the same frozen transaction; otherwise the
-        // title/client lose their material while buttons and fields retain translucent colours.
+        // Inactive must be byte-for-byte the same visual mode as disabling the experiment: AUTO
+        // backdrop, zero client frame and the ordinary palette. Reapply and confirm MAINWINDOW
+        // only after this exact top-level becomes active again.
         let redraw = redraw::suspend(hwnd);
+        self.apply_experimental_window_backdrop(hwnd);
         self.apply_native_dark_theme(hwnd);
         redraw::resume(hwnd, redraw);
     }

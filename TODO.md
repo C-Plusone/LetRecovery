@@ -20,7 +20,7 @@
 - [x] ~~实验性全窗口 Mica 关闭时，标题栏仍遵循 Windows 11 的系统标题栏/Mica 行为，客户区保持普通主题。~~
   - 关闭实验选项时显式设置 `DWMSBT_AUTO` 并撤销客户区 frame，由 DWM 只决定默认标题栏背景。
 - [x] ~~顶层窗口的 Mica 与 Windows 激活状态同步：窗口失去激活后由系统决定标题栏/背景表现，子控件不得继续显示成“独立悬浮的 Mica”。~~
-  - 主窗口和工具对话框以各自 `WM_NCACTIVATE` 的标题栏激活态为准，在冻结事务中同步切换材质/普通控件调色板；不得用消息过渡期可能滞后的 `GetForegroundWindow` 推断。
+  - 主窗口和工具对话框以各自 `WM_NCACTIVATE` 的标题栏激活态为准；失活同步设置 `DWMSBT_AUTO`、撤销全客户区 frame 并恢复普通主题，重新激活后再申请和回读 Mica，不得只换控件色或用滞后的 `GetForegroundWindow` 推断。
 - [x] ~~在不支持 DWM Mica 的系统或 DWM 请求失败时，全部控件可靠回退普通不透明主题；不得出现“窗口没有 Mica、控件却仍像 Mica”的混合状态。~~
   - 只有 DWM 合成开启、`DwmSetWindowAttribute` 成功、`DwmGetWindowAttribute` 回读为 `DWMSBT_MAINWINDOW` 且全客户区 frame 成功，激活窗口才启用材质调色板；失败立即恢复 `DWMSBT_AUTO`、零 frame 和普通不透明控件主题。
 - [x] ~~明确阻止 PE 端启用或模拟 Mica；PE 只使用其受支持的普通不透明原生主题。~~
@@ -31,8 +31,8 @@
 - [x] ~~使用微软官方文档核对 ListView 双缓冲、重绘事务、DWM 系统背景、激活状态和主题回退方案，并在实现文档中记录采用的公开接口与限制。~~
   - 已在 `docs/EXPERIMENTAL_WINDOW_BACKDROPS.md` 记录公开接口、激活语义、批量重绘、Header 所有权、滚动条限制与官方链接。
 - [ ] 完成正常端明/暗主题、Mica 开/关、窗口激活/失活、安装页选择、硬件信息页和工具对话框的实机截图/交互回归；如仍可见瑕疵，不得划掉对应事项。
-  - 本轮已实测深色 Mica 主窗口失活/重新激活和 `SystemDrive=X:` 的 PE 回退；浅色、Mica 关闭、工具对话框及仍开放的闪烁项尚未完成，因此本项保持未勾选。
+  - 本轮已实测深色与浅色 Mica 主窗口失活/重新激活及 `SystemDrive=X:` 的 PE 回退；浅色失活文字已恢复普通主题对比度。Mica 明确关闭、工具对话框及仍开放的闪烁项尚未完成，因此本项保持未勾选。
 - [x] ~~本轮修复完成后重新运行仓库要求的格式、Check、Clippy 和测试；复核 `AGENTS.md` 职责与安全约束。~~
   - `cargo fmt --all --check`、workspace Check、严格 Clippy、workspace no-run、`lr-core`、PE 与正常端测试均通过；职责目录已同步 DWM 回读、`WM_NCACTIVATE` 门禁与首帧非零 alpha 屏障。
 - [ ] 本轮修复通过瞬时帧和滚动交互复核后重新构建正常系统端 release，核对大小与 SHA-256 后原子更新 `pkg/LetRecovery.exe`；`pkg/` 不加入 Git。
-  - 本轮 Mica 门禁修复已构建 release 并原子同步 `pkg/LetRecovery.exe`（7,662,080 字节，SHA-256 `C38A0ACFD8261A0B233EF2E78E1488BA5A58E4F400D16D70B8734D4C83E5CEDC`）；滚动和浅色瞬时帧仍开放，因此总项不划掉。
+  - 本轮完整 Mica 失活回退修复已构建 release 并原子同步 `pkg/LetRecovery.exe`（7,662,080 字节，SHA-256 `9C1B9D04027BBEF5F2FD9DFFB7342FB13384FD11988D0EC8C4C0B62F6C89CB2F`）；浅色失活可读性已实机复核，滚动闪烁、Mica 明确关闭及工具对话框矩阵仍开放，因此总项不划掉。
