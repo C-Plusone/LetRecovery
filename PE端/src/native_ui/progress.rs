@@ -7,7 +7,8 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, DeleteObject, EndPaint, FillRect, GdiFlush, GetDC, InvalidateRect, ReleaseDC,
-    SetBkColor, SetBkMode, SetTextColor, HBRUSH, HDC, HFONT, PAINTSTRUCT, TRANSPARENT,
+    SetBkColor, SetBkMode, SetTextColor, UpdateWindow, HBRUSH, HDC, HFONT, PAINTSTRUCT,
+    TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -34,6 +35,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE,
 };
 
+#[cfg(any(test, feature = "non-elevated-tests"))]
+use crate::app::{WorkerMessage, MAX_WORKER_MESSAGES_PER_POLL};
 use crate::app::{WorkflowRecoverySnapshot, WorkflowSession};
 use crate::core::config::{ConfigFileManager, OperationType};
 use crate::ui::progress::{BackupStep, InstallStep, ProgressState, StepStatus};
@@ -231,6 +234,10 @@ fn step_status(index: usize, current: usize, progress: u8, failed: bool) -> Step
 struct NativeProgressWindow {
     operation_type: OperationType,
     start_worker: bool,
+    #[cfg(feature = "non-elevated-tests")]
+    preview_state: PreviewState,
+    #[cfg(feature = "non-elevated-tests")]
+    preview_sender: Option<std::sync::mpsc::Sender<WorkerMessage>>,
     state: NativeWindowState<Option<WorkflowSession>>,
     presentation: ProgressPresentation,
     worker_finished: bool,
@@ -273,6 +280,10 @@ impl NativeProgressWindow {
         Self {
             operation_type,
             start_worker,
+            #[cfg(feature = "non-elevated-tests")]
+            preview_state,
+            #[cfg(feature = "non-elevated-tests")]
+            preview_sender: None,
             state,
             presentation,
             worker_finished: false,
@@ -355,6 +366,17 @@ impl NativeProgressWindow {
             }
             let mut session = WorkflowSession::new_for_operation(Some(self.operation_type));
             session.start_worker();
+            self.state.workflow = Some(session);
+        }
+        #[cfg(feature = "non-elevated-tests")]
+        if !self.start_worker && self.preview_state == PreviewState::Running {
+            if SetTimer(hwnd, WORKER_TIMER_ID, WORKER_POLL_INTERVAL_MS, None) == 0 {
+                let _ = KillTimer(hwnd, ANIMATION_TIMER_ID);
+                return Err(windows::core::Error::from_win32());
+            }
+            let (session, sender) = WorkflowSession::new_message_preview(self.operation_type);
+            seed_running_preview(&sender, self.operation_type);
+            self.preview_sender = Some(sender);
             self.state.workflow = Some(session);
         }
         self.synchronize_close_affordances(hwnd);
@@ -453,6 +475,7 @@ impl NativeProgressWindow {
     }
 
     unsafe fn apply_presentation(&mut self, hwnd: HWND, next: ProgressPresentation) {
+        let rows_changed = self.presentation.rows != next.rows;
         if self.presentation.step_progress != next.step_progress {
             let _ = InvalidateRect(hwnd, Some(&self.step_bar), false);
         }
@@ -467,7 +490,7 @@ impl NativeProgressWindow {
             };
             set_text(self.status, &status);
         }
-        if self.presentation.rows != next.rows {
+        if rows_changed {
             for (label, row) in self.row_labels.iter().zip(&next.rows) {
                 set_text(*label, &crate::tr!(row.name));
             }
@@ -484,10 +507,37 @@ impl NativeProgressWindow {
             let _ = InvalidateRect(hwnd, None, false);
         }
         self.presentation = next;
+        if rows_changed {
+            if self.refresh_spinner_rect() {
+                self.spinner_started = Instant::now();
+            }
+            // Row labels are child STATIC windows. Repainting only the parent-owned icon slot leaves
+            // the child text in its previous color after InProgress -> Completed transitions.
+            // Publish the new presentation first, then synchronously repaint every affected label so
+            // WM_CTLCOLORSTATIC observes the new semantic state.
+            for label in &self.row_labels {
+                let _ = InvalidateRect(*label, None, true);
+                let _ = UpdateWindow(*label);
+            }
+        }
         if terminal_changed {
             self.synchronize_close_affordances(hwnd);
             self.update_command_bar();
         }
+    }
+
+    fn refresh_spinner_rect(&mut self) -> bool {
+        let previous = self.spinner_rect;
+        self.spinner_rect = self
+            .row_icons
+            .iter()
+            .zip(&self.presentation.rows)
+            .find_map(|(icon, row)| (row.status == StepStatus::InProgress).then_some(*icon))
+            .unwrap_or_default();
+        previous.left != self.spinner_rect.left
+            || previous.top != self.spinner_rect.top
+            || previous.right != self.spinner_rect.right
+            || previous.bottom != self.spinner_rect.bottom
     }
 
     fn can_close(&self) -> bool {
@@ -925,13 +975,45 @@ fn initial_progress(operation_type: OperationType) -> ProgressState {
     }
 }
 
+#[cfg(any(test, feature = "non-elevated-tests"))]
+fn seed_running_preview(
+    sender: &std::sync::mpsc::Sender<WorkerMessage>,
+    operation_type: OperationType,
+) {
+    match operation_type {
+        OperationType::Install => {
+            let _ = sender.send(WorkerMessage::SetInstallStep(InstallStep::VerifyImage));
+            let _ = sender.send(WorkerMessage::SetProgress(100));
+            let _ = sender.send(WorkerMessage::SetInstallStep(InstallStep::FormatPartition));
+            let _ = sender.send(WorkerMessage::SetProgress(100));
+            let _ = sender.send(WorkerMessage::SetInstallStep(InstallStep::ApplyImage));
+            let _ = sender.send(WorkerMessage::SetProgress(5));
+        }
+        OperationType::Backup => {
+            let _ = sender.send(WorkerMessage::SetBackupStep(BackupStep::ReadConfig));
+            let _ = sender.send(WorkerMessage::SetProgress(100));
+            let _ = sender.send(WorkerMessage::SetBackupStep(BackupStep::CaptureImage));
+            let _ = sender.send(WorkerMessage::SetProgress(5));
+        }
+        OperationType::Expand => {
+            let _ = sender.send(WorkerMessage::SetProgress(5));
+        }
+    }
+    for index in 0..MAX_WORKER_MESSAGES_PER_POLL {
+        let _ = sender.send(WorkerMessage::SetProgress(5));
+        let _ = sender.send(WorkerMessage::SetStatus(format!(
+            "UI message-flood preview {index}"
+        )));
+    }
+}
+
 fn launch_progress(
     operation_type: OperationType,
     start_worker: bool,
     preview_state: PreviewState,
 ) -> ProgressState {
     let mut progress = initial_progress(operation_type);
-    if start_worker {
+    if start_worker || preview_state == PreviewState::Running {
         return progress;
     }
     match operation_type {
@@ -1421,9 +1503,18 @@ mod tests {
     }
 
     #[test]
-    fn running_progress_preview_contains_the_real_animated_step() {
-        let state = launch_progress(OperationType::Install, false, PreviewState::Running);
-        let view = ProgressPresentation::from_state(&state);
+    fn running_progress_preview_uses_the_production_message_transition_path() {
+        let initial = launch_progress(OperationType::Install, false, PreviewState::Running);
+        assert!(!initial.has_current_step);
+
+        let (mut session, sender) = WorkflowSession::new_message_preview(OperationType::Install);
+        seed_running_preview(&sender, OperationType::Install);
+        session.process_messages();
+        let view = ProgressPresentation::from_state(&session.snapshot());
+        assert_eq!(
+            view.rows[InstallStep::FormatPartition.index()].status,
+            StepStatus::Completed
+        );
         assert_eq!(
             view.rows[InstallStep::ApplyImage.index()].status,
             StepStatus::InProgress

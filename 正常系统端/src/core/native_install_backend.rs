@@ -1331,6 +1331,18 @@ impl ProductionInstallBackend {
                 native_install_compat::classify_windows_version(major, minor, build)
             })
             .unwrap_or(native_install_compat::WindowsFamily::Unsupported);
+        let international = if matches!(
+            family,
+            native_install_compat::WindowsFamily::Windows10
+                | native_install_compat::WindowsFamily::Windows11
+        ) {
+            Some(
+                lr_core::offline_international::read_offline_international_settings(&self.target)
+                    .map_err(|error| Self::error("read_offline_international", error))?,
+            )
+        } else {
+            None
+        };
         let advanced = &intent.options.advanced_options;
         let xml = native_install_compat::render_default_unattend(&DefaultUnattendOptions {
             architecture,
@@ -1339,7 +1351,9 @@ impl ProductionInstallBackend {
                 .custom_username
                 .then_some(advanced.username.as_str()),
             remove_uwp_apps: advanced.remove_uwp_apps,
-        });
+            international: international.as_ref(),
+        })
+        .map_err(|error| Self::error("render_default_unattend", error))?;
         std::fs::write(&destination, &xml)
             .map_err(|error| Self::error("write_default_unattend", error))?;
         let sysprep = Path::new(&self.target)

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::core::config::{ConfigFileManager, OperationType};
 use crate::core::dism::DismProgress;
@@ -52,6 +53,11 @@ pub(crate) enum WorkerMessage {
     /// 标记失败
     Failed(String),
 }
+
+/// A worker poll runs on the Win32 UI thread. It must yield before the 16 ms animation timer is
+/// starved, even when an image engine produces progress messages faster than they can be painted.
+pub(crate) const MAX_WORKER_MESSAGES_PER_POLL: usize = 256;
+const MAX_WORKER_POLL_SLICE: Duration = Duration::from_millis(4);
 
 pub(crate) struct WorkflowSession {
     /// 进度状态
@@ -113,6 +119,35 @@ impl WorkflowSession {
     }
 
     /// 启动工作线程
+    /// Build a message-driven preview session without starting a worker or touching the workflow
+    /// journal. The UI preview uses this to exercise the same bounded receiver and state-transition
+    /// path as production while remaining safe on a normal desktop.
+    #[cfg(any(test, feature = "non-elevated-tests"))]
+    pub(crate) fn new_message_preview(
+        operation_type: OperationType,
+    ) -> (Self, Sender<WorkerMessage>) {
+        let progress_state = Arc::new(Mutex::new(match operation_type {
+            OperationType::Install => ProgressState::new_install(),
+            OperationType::Backup => ProgressState::new_backup(),
+            OperationType::Expand => ProgressState::new_expand(),
+        }));
+        let (tx, rx) = channel();
+        (
+            Self {
+                progress_state,
+                message_rx: Some(rx),
+                started: true,
+                worker_handle: None,
+                worker_finished: false,
+                terminal_message_seen: false,
+                channel_failure_reported: false,
+                operation_type: Some(operation_type),
+                workflow_journal: None,
+            },
+            tx,
+        )
+    }
+
     pub(crate) fn start_worker(&mut self) {
         if self.started {
             return;
@@ -142,6 +177,8 @@ impl WorkflowSession {
 
     /// 处理工作线程消息
     pub(crate) fn process_messages(&mut self) {
+        let poll_started = Instant::now();
+        let mut processed = 0usize;
         let mut disconnected = false;
         if let Some(ref rx) = self.message_rx {
             loop {
@@ -189,6 +226,12 @@ impl WorkflowSession {
                             state.mark_failed(&e);
                         }
                     }
+                }
+                processed += 1;
+                if processed >= MAX_WORKER_MESSAGES_PER_POLL
+                    || poll_started.elapsed() >= MAX_WORKER_POLL_SLICE
+                {
+                    break;
                 }
             }
         }
@@ -1354,6 +1397,33 @@ mod workflow_session_tests {
             },
             tx,
         )
+    }
+
+    #[test]
+    fn worker_poll_yields_before_a_progress_flood_can_starve_ui_timers() {
+        let (mut session, tx) = WorkflowSession::new_message_preview(OperationType::Install);
+        for index in 0..(MAX_WORKER_MESSAGES_PER_POLL * 2) {
+            tx.send(WorkerMessage::SetStatus(format!("flood-{index}")))
+                .unwrap();
+        }
+        tx.send(WorkerMessage::SetInstallStep(InstallStep::ApplyImage))
+            .unwrap();
+
+        session.process_messages();
+        assert!(session
+            .message_rx
+            .as_ref()
+            .is_some_and(|receiver| receiver.try_recv().is_ok()));
+
+        for _ in 0..(MAX_WORKER_MESSAGES_PER_POLL * 2 + 1) {
+            session.process_messages();
+            if session.snapshot().has_current_step {
+                break;
+            }
+        }
+        let state = session.snapshot();
+        assert!(state.has_current_step);
+        assert_eq!(state.current_install_step, InstallStep::ApplyImage);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use lr_core::command::CommandRequest;
 use lr_core::format_command::{system_format_executable, FormatCommandError, FormatCommandSpec};
+use lr_core::offline_international::OfflineInternationalSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WindowsFamily {
@@ -71,13 +72,16 @@ pub struct DefaultUnattendOptions<'a> {
     pub family: WindowsFamily,
     pub username: Option<&'a str>,
     pub remove_uwp_apps: bool,
+    pub international: Option<&'a OfflineInternationalSettings>,
 }
 
 /// Generates the same default answer file used by the old direct workflow.
 ///
 /// The caller writes the returned text to Panther/Sysprep only after image
 /// application succeeds. User text is XML-escaped before interpolation.
-pub fn render_default_unattend(options: &DefaultUnattendOptions<'_>) -> String {
+pub fn render_default_unattend(
+    options: &DefaultUnattendOptions<'_>,
+) -> Result<String, &'static str> {
     let username = xml_escape(
         options
             .username
@@ -137,7 +141,6 @@ pub fn render_default_unattend(options: &DefaultUnattendOptions<'_>) -> String {
         _ => {
             r#"<OOBE>
                 <HideEULAPage>true</HideEULAPage>
-                <HideLocalAccountScreen>true</HideLocalAccountScreen>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
                 <ProtectYourPC>3</ProtectYourPC>
@@ -146,7 +149,35 @@ pub fn render_default_unattend(options: &DefaultUnattendOptions<'_>) -> String {
     };
     let architecture = options.architecture.as_str();
 
-    format!(
+    let (international_component, time_zone) = if matches!(
+        options.family,
+        WindowsFamily::Windows10 | WindowsFamily::Windows11
+    ) {
+        let international = options
+            .international
+            .ok_or("Windows 10/11 default unattend requires offline international settings")?;
+        let input_locale = xml_escape(&international.input_locale);
+        let system_locale = xml_escape(&international.system_locale);
+        let ui_language = xml_escape(&international.ui_language);
+        let user_locale = xml_escape(&international.user_locale);
+        let time_zone = xml_escape(&international.time_zone);
+        (
+            format!(
+                r#"        <component name="Microsoft-Windows-International-Core" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <InputLocale>{input_locale}</InputLocale>
+            <SystemLocale>{system_locale}</SystemLocale>
+            <UILanguage>{ui_language}</UILanguage>
+            <UserLocale>{user_locale}</UserLocale>
+        </component>
+"#
+            ),
+            format!("            <TimeZone>{time_zone}</TimeZone>\n"),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+
+    Ok(format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <settings pass="windowsPE">
@@ -161,7 +192,9 @@ pub fn render_default_unattend(options: &DefaultUnattendOptions<'_>) -> String {
         </component>
     </settings>
     <settings pass="oobeSystem">
+{international_component}
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+{time_zone}
             {oobe}
             <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Password><Value></Value><PlainText>true</PlainText></Password><Description>Local User</Description><DisplayName>{username}</DisplayName><Group>Administrators</Group><Name>{username}</Name></LocalAccount></LocalAccounts></UserAccounts>
             <AutoLogon><Password><Value></Value><PlainText>true</PlainText></Password><Enabled>true</Enabled><LogonCount>1</LogonCount><Username>{username}</Username></AutoLogon>
@@ -170,7 +203,7 @@ pub fn render_default_unattend(options: &DefaultUnattendOptions<'_>) -> String {
         </component>
     </settings>
 </unattend>"#
-    )
+    ))
 }
 
 fn xml_escape(value: &str) -> String {
@@ -360,21 +393,49 @@ mod tests {
             family: WindowsFamily::Windows7,
             username: Some("A&B<User>"),
             remove_uwp_apps: true,
-        });
+            international: None,
+        })
+        .unwrap();
         assert!(win7.contains("processorArchitecture=\"amd64\""));
         assert!(win7.contains("A&amp;B&lt;User&gt;"));
         assert!(!win7.contains("HideOnlineAccountScreens"));
         assert!(!win7.contains("remove_uwp.ps1"));
 
+        let international = OfflineInternationalSettings {
+            ui_language: "zh-CN".to_string(),
+            system_locale: "zh-CN".to_string(),
+            user_locale: "zh-CN".to_string(),
+            input_locale: "0804:00000804".to_string(),
+            time_zone: "China Standard Time".to_string(),
+        };
         let win11 = render_default_unattend(&DefaultUnattendOptions {
             architecture: UnattendArchitecture::X86,
             family: WindowsFamily::Windows11,
             username: None,
             remove_uwp_apps: true,
-        });
+            international: Some(&international),
+        })
+        .unwrap();
         assert!(win11.contains("HideOnlineAccountScreens"));
         assert!(win11.contains("remove_uwp.ps1"));
         assert!(win11.contains("<Order>3</Order>"));
+        assert!(win11.contains("<UILanguage>zh-CN</UILanguage>"));
+        assert!(win11.contains("<InputLocale>0804:00000804</InputLocale>"));
+        assert!(win11.contains("<TimeZone>China Standard Time</TimeZone>"));
+        assert!(!win11.contains("HideLocalAccountScreen"));
+    }
+
+    #[test]
+    fn windows_11_unattend_rejects_missing_international_settings() {
+        let error = render_default_unattend(&DefaultUnattendOptions {
+            architecture: UnattendArchitecture::Amd64,
+            family: WindowsFamily::Windows11,
+            username: None,
+            remove_uwp_apps: false,
+            international: None,
+        })
+        .unwrap_err();
+        assert!(error.contains("requires offline international settings"));
     }
 
     #[test]

@@ -663,7 +663,8 @@ fn execute_pe_install(
 
     // 生成无人值守配置
     if config.unattended {
-        let _ = generate_unattend_xml_pe(target_partition, &config.custom_username);
+        generate_unattend_xml_pe(target_partition, &config.custom_username)
+            .context("[PE INSTALL] 生成无人值守配置失败")?;
     }
 
     log::info!("[PE INSTALL] Step 6: 清理临时文件");
@@ -802,6 +803,7 @@ fn detect_uefi_mode() -> bool {
 /// 生成无人值守XML (PE版本)
 fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::Result<()> {
     use crate::core::system_utils::{get_file_version, get_system_architecture};
+    use anyhow::Context;
     use std::path::Path;
 
     let username = if username.is_empty() {
@@ -829,6 +831,15 @@ fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::R
         None => (false, false),
     };
 
+    let international = if is_win7 || is_win8 {
+        None
+    } else {
+        Some(
+            lr_core::offline_international::read_offline_international_settings(target_partition)
+                .context("读取目标系统国际化设置失败")?,
+        )
+    };
+
     // 根据系统版本生成不同的OOBE配置
     // Win7: 移除HideOEMRegistrationScreen（家庭版不支持）
     let oobe_section = if is_win7 {
@@ -847,11 +858,33 @@ fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::R
     } else {
         r#"<OOBE>
                 <HideEULAPage>true</HideEULAPage>
-                <HideLocalAccountScreen>true</HideLocalAccountScreen>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
                 <ProtectYourPC>3</ProtectYourPC>
             </OOBE>"#
+    };
+
+    let (international_component, time_zone) = if let Some(settings) = international.as_ref() {
+        let input_locale = escape_xml_text(&settings.input_locale);
+        let system_locale = escape_xml_text(&settings.system_locale);
+        let ui_language = escape_xml_text(&settings.ui_language);
+        let user_locale = escape_xml_text(&settings.user_locale);
+        let time_zone = escape_xml_text(&settings.time_zone);
+        (
+            format!(
+                r#"        <component name="Microsoft-Windows-International-Core" processorArchitecture="{arch}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <InputLocale>{input_locale}</InputLocale>
+            <SystemLocale>{system_locale}</SystemLocale>
+            <UILanguage>{ui_language}</UILanguage>
+            <UserLocale>{user_locale}</UserLocale>
+        </component>
+"#,
+                arch = arch_str,
+            ),
+            format!("            <TimeZone>{time_zone}</TimeZone>\n"),
+        )
+    } else {
+        (String::new(), String::new())
     };
 
     let xml_content = format!(
@@ -868,7 +901,9 @@ fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::R
         </component>
     </settings>
     <settings pass="oobeSystem">
+{international_component}
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{arch}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+{time_zone}
             {oobe}
             <UserAccounts>
                 <LocalAccounts>
@@ -896,6 +931,8 @@ fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::R
     </settings>
 </unattend>"#,
         arch = arch_str,
+        international_component = international_component,
+        time_zone = time_zone,
         oobe = oobe_section,
         user = username
     );
