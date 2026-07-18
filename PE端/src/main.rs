@@ -197,6 +197,13 @@ fn main() -> anyhow::Result<()> {
     // the host storage stack. Release builds do not contain this branch.
     let args: Vec<String> = std::env::args().collect();
     #[cfg(feature = "non-elevated-tests")]
+    if args.iter().any(|arg| arg == "--ui-progress-preview-failed") {
+        utils::i18n::init("");
+        native_ui::progress::run_failed_preview(core::config::OperationType::Install)
+            .map_err(anyhow::Error::new)?;
+        return Ok(());
+    }
+    #[cfg(feature = "non-elevated-tests")]
     if args.iter().any(|arg| arg == "--ui-progress-preview") {
         utils::i18n::init("");
         native_ui::progress::run_preview(core::config::OperationType::Install)

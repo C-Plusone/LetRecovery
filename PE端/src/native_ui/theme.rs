@@ -116,7 +116,7 @@ impl InnoMetrics {
             item_gap: scale(8),
             section_gap: scale(16),
             corner_radius: scale(4).clamp(2, scale(6).max(2)),
-            progress_height: scale(16),
+            progress_height: scale(10),
             separator_thickness: scale(1).max(1),
         }
     }

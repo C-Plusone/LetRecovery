@@ -24,12 +24,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, GetWindowLongPtrW, KillTimer, LoadCursorW, MoveWindow, PeekMessageW,
     PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, TranslateMessage, BN_CLICKED, CREATESTRUCTW, CS_HREDRAW,
-    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, ICON_BIG, ICON_SMALL, IDC_ARROW, MINMAXINFO,
-    MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO,
-    WM_NCCREATE, WM_PAINT, WM_QUIT, WM_SETFONT, WM_SETICON, WM_SIZE, WM_TIMER, WNDCLASSEXW,
-    WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW, MINMAXINFO, MSG, PM_REMOVE,
+    SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NCCREATE, WM_PAINT, WM_QUIT,
+    WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_EX_DLGMODALFRAME, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 use crate::app::{WorkflowRecoverySnapshot, WorkflowSession};
@@ -47,7 +47,7 @@ use super::state::{NativePage, NativeWindowState, WorkflowKind};
 use super::theme::{ThemeBrushes, ThemeContext};
 use super::window::{
     apply_title_bar_theme, clamp_window_to_work_area, drain_pending_quit_message,
-    fit_window_to_work_area, load_application_icons, monitor_work_area, scaled,
+    fit_window_to_work_area, monitor_work_area, scaled,
 };
 
 const CLASS_NAME: PCWSTR = w!("LetRecovery.PE.Native.Progress");
@@ -92,6 +92,14 @@ enum ProgressTerminal {
     #[default]
     Running,
     Completed,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PreviewState {
+    #[default]
+    Running,
+    #[cfg(feature = "non-elevated-tests")]
     Failed,
 }
 
@@ -247,6 +255,7 @@ impl NativeProgressWindow {
         dpi: u32,
         advanced_options: Option<AdvancedOptionsSummary>,
         start_worker: bool,
+        preview_state: PreviewState,
     ) -> Self {
         let mut progress = initial_progress(operation_type);
         if !start_worker {
@@ -255,7 +264,15 @@ impl NativeProgressWindow {
                 OperationType::Backup => progress.set_backup_step(BackupStep::CaptureImage),
                 OperationType::Expand => {}
             }
-            progress.set_step_progress(5);
+            progress.set_step_progress(match preview_state {
+                PreviewState::Running => 5,
+                #[cfg(feature = "non-elevated-tests")]
+                PreviewState::Failed => 42,
+            });
+            #[cfg(feature = "non-elevated-tests")]
+            if preview_state == PreviewState::Failed {
+                progress.mark_failed("UI preview failure");
+            }
         }
         let presentation = ProgressPresentation::from_state(&progress);
         let mut state = NativeWindowState::new(None);
@@ -814,15 +831,24 @@ impl Drop for NativeProgressWindow {
 }
 
 pub fn run(operation_type: OperationType) -> Result<(), ProgressRunError> {
-    run_internal(operation_type, true)
+    run_internal(operation_type, true, PreviewState::Running)
 }
 
 #[cfg(feature = "non-elevated-tests")]
 pub fn run_preview(operation_type: OperationType) -> Result<(), ProgressRunError> {
-    run_internal(operation_type, false)
+    run_internal(operation_type, false, PreviewState::Running)
 }
 
-fn run_internal(operation_type: OperationType, start_worker: bool) -> Result<(), ProgressRunError> {
+#[cfg(feature = "non-elevated-tests")]
+pub fn run_failed_preview(operation_type: OperationType) -> Result<(), ProgressRunError> {
+    run_internal(operation_type, false, PreviewState::Failed)
+}
+
+fn run_internal(
+    operation_type: OperationType,
+    start_worker: bool,
+    preview_state: PreviewState,
+) -> Result<(), ProgressRunError> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let controls = INITCOMMONCONTROLSEX {
@@ -831,16 +857,12 @@ fn run_internal(operation_type: OperationType, start_worker: bool) -> Result<(),
         };
         let _ = InitCommonControlsEx(&controls);
         let instance = GetModuleHandleW(None).map_err(ProgressRunError::before_worker)?;
-        let (large_icon, small_icon) = load_application_icons(HINSTANCE(instance.0))
-            .map_err(ProgressRunError::before_worker)?;
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(window_proc),
             hInstance: HINSTANCE(instance.0),
             hCursor: LoadCursorW(None, IDC_ARROW).map_err(ProgressRunError::before_worker)?,
-            hIcon: large_icon,
-            hIconSm: small_icon,
             hbrBackground: HBRUSH::default(),
             lpszClassName: CLASS_NAME,
             ..Default::default()
@@ -865,6 +887,7 @@ fn run_internal(operation_type: OperationType, start_worker: bool) -> Result<(),
             dpi,
             advanced_options,
             start_worker,
+            preview_state,
         ));
         let screen_width = GetSystemMetrics(SM_CXSCREEN).max(1);
         let screen_height = GetSystemMetrics(SM_CYSCREEN).max(1);
@@ -872,7 +895,7 @@ fn run_internal(operation_type: OperationType, start_worker: bool) -> Result<(),
         let height = scaled(PREFERRED_HEIGHT, dpi).min(screen_height);
         let title = wide(crate::tr!("LetRecovery PE"));
         let hwnd = match CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+            WS_EX_DLGMODALFRAME,
             CLASS_NAME,
             PCWSTR(title.as_ptr()),
             WINDOW_STYLE(WS_OVERLAPPEDWINDOW.0 | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0),
@@ -891,18 +914,6 @@ fn run_internal(operation_type: OperationType, start_worker: bool) -> Result<(),
                 return Err(ProgressRunError::before_worker(error));
             }
         };
-        let _ = SendMessageW(
-            hwnd,
-            WM_SETICON,
-            WPARAM(ICON_BIG as usize),
-            LPARAM(large_icon.0 as isize),
-        );
-        let _ = SendMessageW(
-            hwnd,
-            WM_SETICON,
-            WPARAM(ICON_SMALL as usize),
-            LPARAM(small_icon.0 as isize),
-        );
         apply_title_bar_theme(hwnd, window.theme.mode);
         let actual_dpi = GetDpiForWindow(hwnd).max(96);
         if actual_dpi != dpi {

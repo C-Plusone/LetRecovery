@@ -118,7 +118,7 @@ pub unsafe fn draw_progress(dc: HDC, rect: RECT, percent: u8, palette: Palette) 
     if width == 0 || height == 0 {
         return;
     }
-    let radius = ((height * 5 + 8) / 16).clamp(2, (height / 2).max(2));
+    let radius = ((height + 1) / 2).max(1);
     let inner_width = (width - 2).max(0);
     let filled = inner_width.saturating_mul(i32::from(percent.min(100))) / 100;
     let pixels = render_progress_pixels(width, height, radius, filled, palette);
@@ -246,31 +246,24 @@ pub struct ProgressRingFrame {
     pub sweep_radians: f64,
 }
 
-/// Reproduces Cloud-MGR's two-second linear ProgressRing timeline.
+/// Returns a continuous indeterminate-ring frame driven by elapsed wall-clock time.
 ///
-/// Its 16×16 source geometry uses a radius of 7, a dash length of 0.01→21.99→0.01 and
-/// rotation of 0→450°→1080°. The returned angles use the screen coordinate system, where
-/// increasing angles move clockwise because Y grows downwards.
+/// The arc rotates at a constant rate while its sweep uses cosine easing. It never collapses into
+/// a nearly invisible dot, and both values meet continuously at the loop boundary. Increasing
+/// angles move clockwise because screen Y grows downwards.
 pub fn progress_ring_frame(elapsed_seconds: f64) -> ProgressRingFrame {
-    let phase = elapsed_seconds.rem_euclid(2.0) / 2.0;
-    let (dash, rotation) = if phase < 0.5 {
-        let factor = phase / 0.5;
-        (0.01 + (21.99 - 0.01) * factor, 450.0 * factor)
-    } else {
-        let factor = (phase - 0.5) / 0.5;
-        (
-            21.99 + (0.01 - 21.99) * factor,
-            450.0 + (1080.0 - 450.0) * factor,
-        )
-    };
+    const PERIOD_SECONDS: f64 = 1.6;
+    const MIN_SWEEP: f64 = std::f64::consts::PI * 0.36;
+    const SWEEP_RANGE: f64 = std::f64::consts::PI * 1.04;
+    let phase = elapsed_seconds.rem_euclid(PERIOD_SECONDS) / PERIOD_SECONDS;
+    let eased = (1.0 - (phase * std::f64::consts::TAU).cos()) * 0.5;
     ProgressRingFrame {
-        start_radians: (rotation - 90.0).to_radians(),
-        sweep_radians: (dash / (2.0 * std::f64::consts::PI * 7.0) * 2.0 * std::f64::consts::PI)
-            .clamp(0.0, 2.0 * std::f64::consts::PI),
+        start_radians: phase * std::f64::consts::TAU - std::f64::consts::FRAC_PI_2,
+        sweep_radians: MIN_SWEEP + SWEEP_RANGE * eased,
     }
 }
 
-/// Draws the Cloud-MGR indeterminate ring with analytic supersampling and true circular caps.
+/// Draws the indeterminate ring with analytic supersampling and true circular caps.
 ///
 /// GDI polylines visibly facet at this 16–24 px size. This painter instead measures coverage for
 /// every destination pixel, composites one opaque BGRA frame, and transfers it in a single blit.
@@ -280,7 +273,7 @@ pub fn progress_ring_frame(elapsed_seconds: f64) -> ProgressRingFrame {
 /// `dc` must remain a valid writable device context for this call and `rect` must describe a
 /// drawable region in it. The function retains neither the DC nor the temporary pixel buffer.
 pub unsafe fn draw_indeterminate_ring(dc: HDC, rect: RECT, elapsed_seconds: f64, palette: Palette) {
-    const SAMPLE_GRID: usize = 8;
+    const SAMPLE_GRID: usize = 4;
     let width = (rect.right - rect.left).max(0);
     let height = (rect.bottom - rect.top).max(0);
     if width == 0 || height == 0 {
@@ -411,14 +404,14 @@ fn top_down_bgra_bitmap_info(width: i32, height: i32) -> BITMAPINFO {
     }
 }
 
-/// Draws the 16px Cloud-MGR semantic badge family without font glyph dependencies.
+/// Draws the 16px semantic badge family without font glyph dependencies.
 ///
 /// # Safety
 ///
 /// `dc` must remain a valid writable device context for this call and `rect` must describe a
 /// drawable region in it. The function retains no GDI handle after returning.
 pub unsafe fn draw_step_status_icon(dc: HDC, rect: RECT, status: StepStatusIcon, palette: Palette) {
-    const SCALE: i32 = 4;
+    const SCALE: i32 = 8;
     let width = (rect.right - rect.left).max(0);
     let height = (rect.bottom - rect.top).max(0);
     if width == 0 || height == 0 {
@@ -482,16 +475,14 @@ pub unsafe fn draw_step_status_icon(dc: HDC, rect: RECT, status: StepStatusIcon,
         let _ = SelectObject(memory_dc, old_inner);
         let _ = DeleteObject(inner);
     } else {
-        let symbol = if palette.dark {
-            rgb(0, 0, 0)
-        } else {
-            rgb(255, 255, 255)
-        };
-        let symbol_pen = CreatePen(PEN_STYLE(0), (SCALE * 3 / 2).max(1), symbol);
+        // Both badge fills are bright enough for one stable dark mark to remain clearer than a
+        // theme-dependent black/white swap.
+        let symbol = rgb(24, 28, 26);
+        let symbol_pen = CreatePen(PEN_STYLE(0), (SCALE * 2).max(1), symbol);
         let old_symbol_pen = SelectObject(memory_dc, symbol_pen);
         let cx = high_width / 2;
         let cy = high_height / 2;
-        let half = (high_width.min(high_height) * 3 / 16).max(SCALE);
+        let half = (high_width.min(high_height) * 7 / 32).max(SCALE);
         match status {
             StepStatusIcon::Success => {
                 let _ = MoveToEx(memory_dc, cx - half, cy, None);
@@ -2043,19 +2034,18 @@ mod tests {
     }
 
     #[test]
-    fn progress_ring_preserves_cloud_mgr_two_second_keyframes() {
+    fn progress_ring_is_continuous_and_never_collapses() {
         let start = progress_ring_frame(0.0);
-        let midpoint = progress_ring_frame(1.0);
-        let repeated = progress_ring_frame(2.0);
+        let midpoint = progress_ring_frame(0.8);
+        let repeated = progress_ring_frame(1.6);
         assert!((start.start_radians + std::f64::consts::FRAC_PI_2).abs() < 1.0e-9);
-        assert!(start.sweep_radians > 0.0 && start.sweep_radians < 0.01);
-        assert!((midpoint.start_radians - 2.0 * std::f64::consts::PI).abs() < 1.0e-9);
-        assert!((midpoint.sweep_radians - std::f64::consts::PI).abs() < 0.01);
+        assert!(start.sweep_radians > std::f64::consts::FRAC_PI_4);
+        assert!(midpoint.sweep_radians > start.sweep_radians);
         assert_eq!(start, repeated);
     }
 
     #[test]
-    fn progress_ring_round_caps_remain_visible_at_minimum_dash() {
+    fn progress_ring_round_caps_remain_visible_at_minimum_sweep() {
         let frame = progress_ring_frame(0.0);
         let radius = 7.0;
         let cap = (
@@ -2081,10 +2071,10 @@ mod tests {
 
     #[test]
     fn progress_raster_preserves_window_color_outside_rounded_track() {
-        let pixels = render_progress_pixels(80, 16, 5, 20, Palette::DARK);
+        let pixels = render_progress_pixels(80, 10, 5, 20, Palette::DARK);
         let (red, green, blue) = colorref_rgb(Palette::DARK.window);
         assert_eq!(&pixels[..4], &[blue, green, red, 255]);
-        let fill_offset = (8 * 80 + 4) * 4;
+        let fill_offset = (5 * 80 + 4) * 4;
         assert_ne!(
             &pixels[fill_offset..fill_offset + 4],
             &[blue, green, red, 255]

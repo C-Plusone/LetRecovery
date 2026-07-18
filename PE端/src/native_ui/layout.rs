@@ -51,7 +51,7 @@ pub(crate) fn progress_geometry(
     let line_height = scale(22);
     let title_height = scale(28);
     let subtitle_height = scale(22);
-    let bar_height = scale(16);
+    let bar_height = scale(10);
     let button_height = scale(30);
     let command_height = (button_height + scale(12).min(24)).min(height / 3).max(1);
     let command_top = (height - command_height).max(0);
