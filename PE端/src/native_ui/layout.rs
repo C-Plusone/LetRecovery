@@ -21,6 +21,7 @@ impl PixelRect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProgressGeometry {
     pub pad: i32,
+    pub row_height: i32,
     pub title: PixelRect,
     pub subtitle: Option<PixelRect>,
     pub step_caption: Option<PixelRect>,
@@ -40,6 +41,7 @@ pub(crate) fn progress_geometry(
     dpi: u32,
     has_step: bool,
     row_count: usize,
+    reserve_command_bar: bool,
 ) -> ProgressGeometry {
     let width = width.max(1);
     let height = height.max(1);
@@ -50,11 +52,16 @@ pub(crate) fn progress_geometry(
     let top = scale(16).min(24);
     let gap = scale(6).min(12);
     let line_height = scale(22);
-    let title_height = scale(28);
+    let row_height = scale(26);
+    let title_height = scale(40);
     let subtitle_height = scale(22);
     let bar_height = scale(10);
     let button_height = scale(30);
-    let command_height = (button_height + scale(12).min(24)).min(height / 3).max(1);
+    let command_height = if reserve_command_bar {
+        (button_height + scale(12).min(24)).min(height / 3).max(1)
+    } else {
+        0
+    };
     let command_top = (height - command_height).max(0);
     let command = PixelRect {
         x: 0,
@@ -150,8 +157,8 @@ pub(crate) fn progress_geometry(
     };
     let row_gap = if row_count == 0 { 0 } else { scale(18) };
     let rows_top = (cursor + row_gap).min(status_bottom);
-    let single_column_height = line_height.saturating_mul(row_count as i32);
-    let two_column_height = line_height.saturating_mul(row_count.div_ceil(2) as i32);
+    let single_column_height = row_height.saturating_mul(row_count as i32);
+    let two_column_height = row_height.saturating_mul(row_count.div_ceil(2) as i32);
     let available_rows_height = (status_bottom - rows_top).max(0);
     let (rows_height, all_rows_fit) = if single_column_height <= available_rows_height {
         (single_column_height, true)
@@ -162,7 +169,9 @@ pub(crate) fn progress_geometry(
     };
     let natural_bottom = rows_top + rows_height;
     let content_height = (natural_bottom - top).max(1);
-    let centered_top = ((status_bottom - content_height) / 2).max(top);
+    // Keep the heading and current-step summary slightly above the mathematical centre while the
+    // complete block still consumes otherwise unused vertical space.
+    let centered_top = ((status_bottom - content_height) / 2 - scale(32)).max(top);
     let vertical_shift = if all_rows_fit {
         (centered_top - top).max(0)
     } else {
@@ -194,6 +203,7 @@ pub(crate) fn progress_geometry(
 
     ProgressGeometry {
         pad,
+        row_height,
         title,
         subtitle,
         step_caption,
@@ -381,7 +391,7 @@ mod tests {
             for dpi in DPIS {
                 for has_step in [false, true] {
                     let row_count = if has_step { 11 } else { 0 };
-                    let layout = progress_geometry(width, height, dpi, has_step, row_count);
+                    let layout = progress_geometry(width, height, dpi, has_step, row_count, true);
                     assert!(layout.title.bottom() <= layout.command.y);
                     assert!(layout.overall_bar.bottom() <= layout.rows.y);
                     assert!(layout.status.bottom() <= layout.command.y);
@@ -403,14 +413,14 @@ mod tests {
     #[test]
     fn roomy_progress_page_centers_the_complete_workflow_block() {
         let dpi = 144;
-        let layout = progress_geometry(1180, 846, dpi, true, 11);
-        let available_bottom = layout.command.y - scaled(6, dpi).min(12);
-        let top_margin = layout.title.y;
-        let bottom_margin = available_bottom - layout.rows.bottom();
+        let layout = progress_geometry(1180, 846, dpi, true, 11, false);
 
-        assert_eq!(layout.rows.height, scaled(22, dpi) * 11);
+        assert_eq!(layout.rows.height, scaled(26, dpi) * 11);
         assert!(layout.title.y > scaled(16, dpi).min(24));
-        assert!((top_margin - bottom_margin).abs() <= 1);
+        assert_eq!(layout.command.y, 846);
+        assert_eq!(layout.command.height, 0);
+        assert!(layout.title.y < 108);
+        assert!(layout.rows.bottom() < 846);
     }
 
     #[test]
@@ -470,7 +480,7 @@ mod tests {
     fn command_buttons_and_footer_never_overlap_in_the_low_size_dpi_matrix() {
         for (width, height) in SIZES {
             for dpi in DPIS {
-                let layout = progress_geometry(width, height, dpi, true, 11);
+                let layout = progress_geometry(width, height, dpi, true, 11, true);
                 let command = command_bar_geometry(
                     layout.command,
                     layout.pad,

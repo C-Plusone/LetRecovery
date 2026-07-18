@@ -84,6 +84,10 @@ pub enum StepStatusIcon {
     Error,
 }
 
+pub const fn step_status_has_badge(status: StepStatusIcon) -> bool {
+    !matches!(status, StepStatusIcon::Pending)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RoundedControlSpec {
     pub radius: i32,
@@ -148,12 +152,7 @@ fn render_progress_pixels(
     palette: Palette,
 ) -> Vec<u8> {
     const SAMPLE_GRID: usize = 4;
-    let colors = [
-        colorref_rgb(palette.window),
-        colorref_rgb(palette.border),
-        colorref_rgb(palette.edit),
-        colorref_rgb(palette.progress),
-    ];
+    let colors = progress_layer_colors(palette);
     let mut pixels = vec![0_u8; width as usize * height as usize * 4];
     let sample_count = (SAMPLE_GRID * SAMPLE_GRID) as u32;
     for y in 0..height as usize {
@@ -180,6 +179,12 @@ fn render_progress_pixels(
         }
     }
     pixels
+}
+
+fn progress_layer_colors(palette: Palette) -> [(u8, u8, u8); 4] {
+    let window = colorref_rgb(palette.window);
+    let track = colorref_rgb(palette.edit);
+    [window, track, track, colorref_rgb(palette.progress)]
 }
 
 fn progress_sample_layer(
@@ -415,6 +420,10 @@ pub unsafe fn draw_step_status_icon(dc: HDC, rect: RECT, status: StepStatusIcon,
     let width = (rect.right - rect.left).max(0);
     let height = (rect.bottom - rect.top).max(0);
     if width == 0 || height == 0 {
+        return;
+    }
+    if !step_status_has_badge(status) {
+        fill_solid_rect(dc, &rect, palette.window);
         return;
     }
     let high_width = width.saturating_mul(SCALE);
@@ -2070,6 +2079,14 @@ mod tests {
     }
 
     #[test]
+    fn pending_step_has_no_badge_while_active_and_terminal_steps_do() {
+        assert!(!step_status_has_badge(StepStatusIcon::Pending));
+        assert!(step_status_has_badge(StepStatusIcon::Current));
+        assert!(step_status_has_badge(StepStatusIcon::Success));
+        assert!(step_status_has_badge(StepStatusIcon::Error));
+    }
+
+    #[test]
     fn progress_raster_preserves_window_color_outside_rounded_track() {
         let pixels = render_progress_pixels(80, 10, 5, 20, Palette::DARK);
         let (red, green, blue) = colorref_rgb(Palette::DARK.window);
@@ -2079,5 +2096,12 @@ mod tests {
             &pixels[fill_offset..fill_offset + 4],
             &[blue, green, red, 255]
         );
+    }
+
+    #[test]
+    fn progress_track_has_no_independent_outline_colour() {
+        let colors = progress_layer_colors(Palette::DARK);
+        assert_eq!(colors[1], colors[2]);
+        assert_ne!(colors[1], colorref_rgb(Palette::DARK.border));
     }
 }

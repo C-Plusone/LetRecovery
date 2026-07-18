@@ -58,11 +58,12 @@ const ANIMATION_FRAME_INTERVAL_MS: u32 = 16;
 const ID_CLOSE: u16 = 2001;
 const ID_BACK: u16 = 2002;
 const ID_DETAILS: u16 = 2003;
-const MIN_WIDTH: i32 = 680;
-const MIN_HEIGHT: i32 = 500;
-const PREFERRED_WIDTH: i32 = 800;
-const PREFERRED_HEIGHT: i32 = 600;
+const MIN_WIDTH: i32 = 440;
+const MIN_HEIGHT: i32 = 480;
+const PREFERRED_WIDTH: i32 = 480;
+const PREFERRED_HEIGHT: i32 = 500;
 const SS_CENTER_STYLE: u32 = 0x0000_0001;
+const SS_CENTERIMAGE_STYLE: u32 = 0x0000_0200;
 
 #[derive(Debug)]
 pub struct ProgressRunError {
@@ -235,7 +236,6 @@ struct NativeProgressWindow {
     overall_caption: HWND,
     overall_percent: HWND,
     status: HWND,
-    footer_status: HWND,
     back: HWND,
     details_button: HWND,
     close: HWND,
@@ -287,7 +287,7 @@ impl NativeProgressWindow {
             theme,
             brushes: ThemeBrushes::new(theme.palette),
             body_font: create_ui_font(dpi, 10),
-            title_font: create_ui_font_for_role(dpi, 12, UiFontRole::Heading),
+            title_font: create_ui_font_for_role(dpi, 16, UiFontRole::Heading),
             title: HWND::default(),
             subtitle: HWND::default(),
             step_caption: HWND::default(),
@@ -295,7 +295,6 @@ impl NativeProgressWindow {
             overall_caption: HWND::default(),
             overall_percent: HWND::default(),
             status: HWND::default(),
-            footer_status: HWND::default(),
             back: HWND::default(),
             details_button: HWND::default(),
             close: HWND::default(),
@@ -321,7 +320,6 @@ impl NativeProgressWindow {
         // The progress page is deliberately read-only and compact. Detailed diagnostics remain in
         // the log instead of a disabled multiline Edit that looks interactive in WinPE.
         self.status = HWND::default();
-        self.footer_status = create_static(hwnd, 2108, &crate::tr!("操作进行中"))?;
         self.back = create_control(
             hwnd,
             ID_BACK,
@@ -349,7 +347,7 @@ impl NativeProgressWindow {
         }
         for (index, _) in self.presentation.rows.iter().enumerate() {
             self.row_labels
-                .push(create_static(hwnd, 2200 + index as u16, "")?);
+                .push(create_row_static(hwnd, 2200 + index as u16, "")?);
             self.row_icons.push(RECT::default());
         }
         self.details_pane = Some(DetailsPane::create(hwnd, self.theme)?);
@@ -389,7 +387,6 @@ impl NativeProgressWindow {
             self.presentation.status.clone()
         };
         set_text(self.status, &status);
-        set_text(self.footer_status, &self.footer_text());
         for (label, row) in self.row_labels.iter().zip(&self.presentation.rows) {
             set_text(*label, &crate::tr!(row.name));
         }
@@ -413,7 +410,6 @@ impl NativeProgressWindow {
             self.step_percent,
             self.overall_caption,
             self.overall_percent,
-            self.footer_status,
             self.back,
             self.details_button,
             self.close,
@@ -440,7 +436,7 @@ impl NativeProgressWindow {
         let _ = DeleteObject(self.body_font);
         let _ = DeleteObject(self.title_font);
         self.body_font = create_ui_font(dpi.max(96), 10);
-        self.title_font = create_ui_font_for_role(dpi.max(96), 12, UiFontRole::Heading);
+        self.title_font = create_ui_font_for_role(dpi.max(96), 16, UiFontRole::Heading);
         self.apply_fonts();
         self.layout(hwnd);
         let _ = InvalidateRect(hwnd, None, false);
@@ -462,7 +458,6 @@ impl NativeProgressWindow {
         let presentation_changed = self.presentation != next;
         self.apply_presentation(hwnd, next);
         if worker_state_changed {
-            set_text(self.footer_status, &self.footer_text());
             let _ = EnableWindow(self.close, self.can_close());
             let _ = InvalidateRect(hwnd, None, false);
         }
@@ -493,7 +488,6 @@ impl NativeProgressWindow {
                 next.status.clone()
             };
             set_text(self.status, &status);
-            set_text(self.footer_status, &self.footer_text_for(next.terminal));
         }
         if self.presentation.rows != next.rows {
             for (label, row) in self.row_labels.iter().zip(&next.rows) {
@@ -519,18 +513,6 @@ impl NativeProgressWindow {
 
     fn can_close(&self) -> bool {
         self.presentation.terminal != ProgressTerminal::Running && self.worker_finished
-    }
-
-    fn footer_text(&self) -> String {
-        self.footer_text_for(self.presentation.terminal)
-    }
-
-    fn footer_text_for(&self, terminal: ProgressTerminal) -> String {
-        if terminal != ProgressTerminal::Running && !self.worker_finished {
-            crate::tr!("正在完成清理和收尾操作...")
-        } else {
-            terminal_footer_text(terminal)
-        }
     }
 
     fn recovery_snapshot(&self) -> WorkflowRecoverySnapshot {
@@ -664,6 +646,7 @@ impl NativeProgressWindow {
             self.theme.dpi,
             has_step,
             self.presentation.rows.len(),
+            self.state.page != NativePage::Progress,
         );
         move_pixel_control(self.title, layout.title);
         if let Some(subtitle) = layout.subtitle {
@@ -691,7 +674,7 @@ impl NativeProgressWindow {
         move_pixel_control(self.overall_caption, layout.overall_caption);
         move_pixel_control(self.overall_percent, layout.overall_percent);
         self.overall_bar = pixel_rect(layout.overall_bar);
-        let line_height = scaled(22, self.theme.dpi);
+        let line_height = layout.row_height;
         let per_column = (layout.rows.height / line_height).max(0) as usize;
         let visible_count = self.row_labels.len().min(per_column.saturating_mul(2));
         let columns = if visible_count > per_column { 2 } else { 1 };
@@ -782,16 +765,6 @@ impl NativeProgressWindow {
             for control in [self.back, self.details_button, self.close] {
                 let _ = ShowWindow(control, SW_HIDE);
             }
-            move_pixel_control(
-                self.footer_status,
-                PixelRect {
-                    x: layout.pad,
-                    y: layout.command.y + (layout.command.height - button_height).max(0) / 2,
-                    width: (layout.command.width - layout.pad * 2).max(1),
-                    height: button_height.min(layout.command.height).max(1),
-                },
-            );
-            let _ = ShowWindow(self.footer_status, SW_SHOW);
             return;
         }
         let command = command_bar_geometry(
@@ -812,18 +785,6 @@ impl NativeProgressWindow {
             move_pixel_control(self.details_button, details);
         }
         move_pixel_control(self.close, command.close);
-        if let Some(footer) = command.footer {
-            move_pixel_control(self.footer_status, footer);
-        }
-        let footer_width = command.footer.map_or(0, |rect| rect.width);
-        let _ = ShowWindow(
-            self.footer_status,
-            if footer_width >= scaled(72, self.theme.dpi) {
-                SW_SHOW
-            } else {
-                SW_HIDE
-            },
-        );
     }
 }
 
@@ -996,14 +957,6 @@ fn terminal_status_text(terminal: ProgressTerminal) -> String {
     }
 }
 
-fn terminal_footer_text(terminal: ProgressTerminal) -> String {
-    match terminal {
-        ProgressTerminal::Running => crate::tr!("操作进行中，当前流程不支持安全取消。"),
-        ProgressTerminal::Completed => crate::tr!("操作已完成"),
-        ProgressTerminal::Failed => crate::tr!("操作失败"),
-    }
-}
-
 fn step_status_icon(status: StepStatus) -> StepStatusIcon {
     match status {
         StepStatus::Pending => StepStatusIcon::Pending,
@@ -1038,6 +991,24 @@ unsafe fn create_centered_static(parent: HWND, id: u16, text: &str) -> windows::
         w!("STATIC"),
         PCWSTR(text.as_ptr()),
         WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | SS_CENTER_STYLE),
+        0,
+        0,
+        0,
+        0,
+        parent,
+        HMENU(id as isize as *mut _),
+        HINSTANCE::default(),
+        None,
+    )
+}
+
+unsafe fn create_row_static(parent: HWND, id: u16, text: &str) -> windows::core::Result<HWND> {
+    let text = wide(text);
+    CreateWindowExW(
+        WINDOW_EX_STYLE(0),
+        w!("STATIC"),
+        PCWSTR(text.as_ptr()),
+        WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | SS_CENTERIMAGE_STYLE),
         0,
         0,
         0,
@@ -1282,6 +1253,7 @@ unsafe extern "system" fn window_proc(
                     window.theme.dpi,
                     window.presentation.workflow != WorkflowKind::Expand,
                     window.presentation.rows.len(),
+                    window.state.page != NativePage::Progress,
                 );
                 let command_top = layout.command.y;
                 let separator_brush =
@@ -1296,13 +1268,15 @@ unsafe extern "system" fn window_proc(
                     };
                     let _ = FillRect(dc, &list_separator, separator_brush);
                 }
-                let separator = RECT {
-                    left: 0,
-                    top: command_top,
-                    right: client.right,
-                    bottom: command_top + window.theme.metrics.separator_thickness,
-                };
-                let _ = FillRect(dc, &separator, separator_brush);
+                if window.state.page != NativePage::Progress {
+                    let separator = RECT {
+                        left: 0,
+                        top: command_top,
+                        right: client.right,
+                        bottom: command_top + window.theme.metrics.separator_thickness,
+                    };
+                    let _ = FillRect(dc, &separator, separator_brush);
+                }
                 let _ = DeleteObject(separator_brush);
                 let _ = EndPaint(hwnd, &paint);
                 return LRESULT(0);
@@ -1329,6 +1303,13 @@ unsafe extern "system" fn window_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_progress_window_is_compact_and_row_text_is_vertically_centered() {
+        assert_eq!((PREFERRED_WIDTH, PREFERRED_HEIGHT), (480, 500));
+        assert_eq!((MIN_WIDTH, MIN_HEIGHT), (440, 480));
+        assert_eq!(SS_CENTERIMAGE_STYLE, 0x0000_0200);
+    }
 
     #[test]
     fn install_failure_marks_only_the_current_step_failed() {
