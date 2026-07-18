@@ -658,7 +658,13 @@ impl NativeProgressWindow {
         let width = (client.right - client.left).max(1);
         let height = (client.bottom - client.top).max(1);
         let has_step = self.presentation.workflow != WorkflowKind::Expand;
-        let layout = progress_geometry(width, height, self.theme.dpi, has_step);
+        let layout = progress_geometry(
+            width,
+            height,
+            self.theme.dpi,
+            has_step,
+            self.presentation.rows.len(),
+        );
         move_pixel_control(self.title, layout.title);
         if let Some(subtitle) = layout.subtitle {
             move_pixel_control(self.subtitle, subtitle);
@@ -1275,6 +1281,7 @@ unsafe extern "system" fn window_proc(
                     client.bottom,
                     window.theme.dpi,
                     window.presentation.workflow != WorkflowKind::Expand,
+                    window.presentation.rows.len(),
                 );
                 let command_top = layout.command.y;
                 let separator_brush =

@@ -39,6 +39,7 @@ pub(crate) fn progress_geometry(
     height: i32,
     dpi: u32,
     has_step: bool,
+    row_count: usize,
 ) -> ProgressGeometry {
     let width = width.max(1);
     let height = height.max(1);
@@ -79,14 +80,14 @@ pub(crate) fn progress_geometry(
     // compact hierarchy instead of leaving an unexplained blank row.
     let show_subtitle = false;
 
-    let title = PixelRect {
+    let mut title = PixelRect {
         x: pad,
         y: top,
         width: content_width,
         height: title_height.min((command_top - top).max(1)),
     };
     let mut cursor = title.bottom() + flow_gap;
-    let subtitle = show_subtitle.then(|| {
+    let mut subtitle = show_subtitle.then(|| {
         let rect = PixelRect {
             x: pad,
             y: cursor,
@@ -121,7 +122,7 @@ pub(crate) fn progress_geometry(
         (caption, percent, bar)
     };
 
-    let (step_caption, step_percent, step_bar) = if has_step && compact_step {
+    let (mut step_caption, mut step_percent, mut step_bar) = if has_step && compact_step {
         let caption = PixelRect {
             x: pad,
             y: cursor,
@@ -137,7 +138,7 @@ pub(crate) fn progress_geometry(
     } else {
         (None, None, None)
     };
-    let (overall_caption, overall_percent, overall_bar) = group(cursor);
+    let (mut overall_caption, mut overall_percent, mut overall_bar) = group(cursor);
     cursor = overall_bar.bottom();
 
     let status_bottom = (command_top - flow_gap).max(cursor);
@@ -147,12 +148,48 @@ pub(crate) fn progress_geometry(
         width: content_width,
         height: 0,
     };
-    let rows_top = (cursor + scale(18)).min(status_bottom);
+    let row_gap = if row_count == 0 { 0 } else { scale(18) };
+    let rows_top = (cursor + row_gap).min(status_bottom);
+    let single_column_height = line_height.saturating_mul(row_count as i32);
+    let two_column_height = line_height.saturating_mul(row_count.div_ceil(2) as i32);
+    let available_rows_height = (status_bottom - rows_top).max(0);
+    let (rows_height, all_rows_fit) = if single_column_height <= available_rows_height {
+        (single_column_height, true)
+    } else if two_column_height <= available_rows_height {
+        (two_column_height, true)
+    } else {
+        (available_rows_height, false)
+    };
+    let natural_bottom = rows_top + rows_height;
+    let content_height = (natural_bottom - top).max(1);
+    let centered_top = ((status_bottom - content_height) / 2).max(top);
+    let vertical_shift = if all_rows_fit {
+        (centered_top - top).max(0)
+    } else {
+        0
+    };
+    let shift = |rect: &mut PixelRect| rect.y += vertical_shift;
+    shift(&mut title);
+    if let Some(rect) = &mut subtitle {
+        shift(rect);
+    }
+    if let Some(rect) = &mut step_caption {
+        shift(rect);
+    }
+    if let Some(rect) = &mut step_percent {
+        shift(rect);
+    }
+    if let Some(rect) = &mut step_bar {
+        shift(rect);
+    }
+    shift(&mut overall_caption);
+    shift(&mut overall_percent);
+    shift(&mut overall_bar);
     let rows = PixelRect {
         x: pad,
-        y: rows_top,
+        y: rows_top + vertical_shift,
         width: content_width,
-        height: (status_bottom - rows_top).max(0),
+        height: rows_height,
     };
 
     ProgressGeometry {
@@ -343,7 +380,8 @@ mod tests {
         for (width, height) in SIZES {
             for dpi in DPIS {
                 for has_step in [false, true] {
-                    let layout = progress_geometry(width, height, dpi, has_step);
+                    let row_count = if has_step { 11 } else { 0 };
+                    let layout = progress_geometry(width, height, dpi, has_step, row_count);
                     assert!(layout.title.bottom() <= layout.command.y);
                     assert!(layout.overall_bar.bottom() <= layout.rows.y);
                     assert!(layout.status.bottom() <= layout.command.y);
@@ -360,6 +398,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn roomy_progress_page_centers_the_complete_workflow_block() {
+        let dpi = 144;
+        let layout = progress_geometry(1180, 846, dpi, true, 11);
+        let available_bottom = layout.command.y - scaled(6, dpi).min(12);
+        let top_margin = layout.title.y;
+        let bottom_margin = available_bottom - layout.rows.bottom();
+
+        assert_eq!(layout.rows.height, scaled(22, dpi) * 11);
+        assert!(layout.title.y > scaled(16, dpi).min(24));
+        assert!((top_margin - bottom_margin).abs() <= 1);
     }
 
     #[test]
@@ -419,7 +470,7 @@ mod tests {
     fn command_buttons_and_footer_never_overlap_in_the_low_size_dpi_matrix() {
         for (width, height) in SIZES {
             for dpi in DPIS {
-                let layout = progress_geometry(width, height, dpi, true);
+                let layout = progress_geometry(width, height, dpi, true, 11);
                 let command = command_bar_geometry(
                     layout.command,
                     layout.pad,
