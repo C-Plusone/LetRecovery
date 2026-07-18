@@ -275,6 +275,43 @@ struct PcaTargetMessage {
     result: Result<(), String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InstallControlSnapshot {
+    format_partition: bool,
+    repair_boot: bool,
+    unattended_install: bool,
+    auto_reboot: bool,
+    run_diskpart_scripts: bool,
+    driver_index: isize,
+    boot_mode_index: isize,
+    pca_mode_index: isize,
+}
+
+impl InstallControlSnapshot {
+    fn apply_to(self, prefs: &mut crate::core::ui_state::InstallPrefs) {
+        prefs.format_partition = self.format_partition;
+        prefs.repair_boot = self.repair_boot;
+        prefs.unattended_install = self.unattended_install;
+        prefs.auto_reboot = self.auto_reboot;
+        prefs.run_diskpart_scripts = self.run_diskpart_scripts;
+        prefs.driver_action = match self.driver_index {
+            1 => crate::core::ui_state::DriverAction::SaveOnly,
+            2 => crate::core::ui_state::DriverAction::None,
+            _ => crate::core::ui_state::DriverAction::AutoImport,
+        };
+        prefs.boot_mode = match self.boot_mode_index {
+            1 => crate::core::ui_state::BootModeSelection::UEFI,
+            2 => crate::core::ui_state::BootModeSelection::Legacy,
+            _ => crate::core::ui_state::BootModeSelection::Auto,
+        };
+        prefs.boot_pca_mode = match self.pca_mode_index {
+            1 => lr_core::boot_pca::BootPcaMode::Pca2011,
+            2 => lr_core::boot_pca::BootPcaMode::Pca2023,
+            _ => lr_core::boot_pca::BootPcaMode::Auto,
+        };
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PcaTargetContext {
     repair_boot: bool,
@@ -318,6 +355,10 @@ fn pca_target_result_is_current(
     message: &PcaTargetMessage,
 ) -> bool {
     active_generation == message.generation && active_target == Some(&message.target)
+}
+
+const fn page_switch_requires_full_layout(page: Page) -> bool {
+    matches!(page, Page::Install)
 }
 
 enum ToolWorkerMessage {
@@ -601,17 +642,18 @@ mod layout_tests {
         command_button_role, confirmed_tool_backend_request,
         device_change_requests_partition_refresh, download_failure_message,
         initial_mutating_tool_state, install_partition_heading_y,
-        list_view_selection_state_changed, minimum_window_size, pca_target_error_blocks,
-        pca_target_probe_required, pca_target_result_is_current, pca_target_uses_uefi,
-        preferred_window_size, primary_state_refresh_for_page, tool_backend_result_succeeded,
-        BitLockerGateCompletion, Page, PcaTargetContext, PcaTargetKey, PcaTargetMessage,
-        PrimaryStateRefresh, DBT_CONFIGCHANGED, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
-        DBT_DEVNODES_CHANGED, LVIF_STATE, LVIF_TEXT, LVIS_SELECTED,
+        list_view_selection_state_changed, minimum_window_size, page_switch_requires_full_layout,
+        pca_target_error_blocks, pca_target_probe_required, pca_target_result_is_current,
+        pca_target_uses_uefi, preferred_window_size, primary_state_refresh_for_page,
+        tool_backend_result_succeeded, BitLockerGateCompletion, InstallControlSnapshot, Page,
+        PcaTargetContext, PcaTargetKey, PcaTargetMessage, PrimaryStateRefresh, DBT_CONFIGCHANGED,
+        DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE, DBT_DEVNODES_CHANGED, LVIF_STATE, LVIF_TEXT,
+        LVIS_SELECTED,
     };
     use crate::core::disk::PartitionStyle;
     use crate::core::native_download_executor::{DownloadFailureStage, DownloadWorkerError};
     use crate::core::native_tool_backend::NativeToolBackendRequest;
-    use crate::core::ui_state::BootModeSelection;
+    use crate::core::ui_state::{BootModeSelection, DriverAction, InstallPrefs};
     use crate::native_ui::tool_dialogs_mutating::{MutatingToolIntent, MutatingToolKind};
 
     #[test]
@@ -723,6 +765,55 @@ mod layout_tests {
                 PrimaryStateRefresh::None
             );
         }
+    }
+
+    #[test]
+    fn every_install_page_entry_rebuilds_inventory_dependent_geometry() {
+        assert!(page_switch_requires_full_layout(Page::Install));
+        for page in [
+            Page::Backup,
+            Page::Download,
+            Page::Tools,
+            Page::Hardware,
+            Page::About,
+        ] {
+            assert!(!page_switch_requires_full_layout(page));
+        }
+    }
+
+    #[test]
+    fn visible_install_defaults_override_stale_cached_preferences_without_notifications() {
+        let mut prefs = InstallPrefs {
+            format_partition: false,
+            repair_boot: false,
+            unattended_install: false,
+            auto_reboot: false,
+            run_diskpart_scripts: true,
+            driver_action: DriverAction::None,
+            boot_mode: BootModeSelection::Legacy,
+            boot_pca_mode: lr_core::boot_pca::BootPcaMode::Pca2011,
+            ..InstallPrefs::default()
+        };
+        InstallControlSnapshot {
+            format_partition: true,
+            repair_boot: true,
+            unattended_install: true,
+            auto_reboot: true,
+            run_diskpart_scripts: false,
+            driver_index: 0,
+            boot_mode_index: 0,
+            pca_mode_index: 2,
+        }
+        .apply_to(&mut prefs);
+
+        assert!(prefs.format_partition);
+        assert!(prefs.repair_boot);
+        assert!(prefs.unattended_install);
+        assert!(prefs.auto_reboot);
+        assert!(!prefs.run_diskpart_scripts);
+        assert_eq!(prefs.driver_action, DriverAction::AutoImport);
+        assert_eq!(prefs.boot_mode, BootModeSelection::Auto);
+        assert_eq!(prefs.boot_pca_mode, lr_core::boot_pca::BootPcaMode::Pca2023);
     }
 
     #[test]
@@ -3476,7 +3567,6 @@ impl NativeWindow {
 
     unsafe fn select_page_impl(&mut self, hwnd: HWND, page: Page, manage_redraw: bool) {
         let Some(h) = self.handles else { return };
-        let returning_from_advanced = self.advanced_visible;
         // Navigation and advanced-page switches settle any in-flight three-frame transition. The
         // target is derived from the already accepted image inventory, never from focus/selection.
         let _ = KillTimer(hwnd, INSTALL_VOLUME_LAYOUT_TIMER_ID);
@@ -3644,12 +3734,11 @@ impl NativeWindow {
             PrimaryStateRefresh::Backup => self.update_backup_primary_state(),
             PrimaryStateRefresh::None => {}
         }
-        if returning_from_advanced {
-            // Entering Advanced repacks the shared title and command bar and hides every Install
-            // control.  Restoring visibility alone leaves the optional image-volume row at the
-            // collapsed geometry, so its ComboBox overlaps the partition heading until another
-            // option happens to request a full layout.  Normalize the complete Install geometry
-            // while the page-switch redraw transaction is still closed, then publish one frame.
+        if page_switch_requires_full_layout(page) {
+            // The install geometry is inventory-dependent: loading an ISO adds the image-volume
+            // row even while another page is visible. Re-entering Install must rebuild its
+            // complete geometry from accepted inventory, not merely restore HWND visibility and
+            // assume the startup layout is still valid.
             self.layout(hwnd);
         } else {
             // Ordinary navigation keeps page geometry stable from startup/WM_SIZE. Only the
@@ -3673,32 +3762,31 @@ impl NativeWindow {
         }
     }
 
-    unsafe fn persist_install_preferences(&mut self) {
-        let Some(h) = &self.handles else { return };
+    unsafe fn install_control_snapshot(&self) -> Option<InstallControlSnapshot> {
+        let Some(h) = &self.handles else {
+            return None;
+        };
         let checked = |control: HWND| SendMessageW(control, 0x00F0, WPARAM(0), LPARAM(0)).0 == 1;
-        self.app_config.install_prefs.format_partition = checked(h.format);
-        self.app_config.install_prefs.repair_boot = checked(h.boot);
-        self.app_config.install_prefs.unattended_install = checked(h.unattend);
-        self.app_config.install_prefs.auto_reboot = checked(h.reboot);
-        self.app_config.install_prefs.run_diskpart_scripts = checked(h.run_diskpart);
-        self.app_config.install_prefs.driver_action =
-            match SendMessageW(h.driver, 0x0147, WPARAM(0), LPARAM(0)).0 {
-                1 => crate::core::ui_state::DriverAction::SaveOnly,
-                2 => crate::core::ui_state::DriverAction::None,
-                _ => crate::core::ui_state::DriverAction::AutoImport,
-            };
-        self.app_config.install_prefs.boot_mode =
-            match SendMessageW(h.boot_mode, 0x0147, WPARAM(0), LPARAM(0)).0 {
-                1 => crate::core::ui_state::BootModeSelection::UEFI,
-                2 => crate::core::ui_state::BootModeSelection::Legacy,
-                _ => crate::core::ui_state::BootModeSelection::Auto,
-            };
-        self.app_config.install_prefs.boot_pca_mode =
-            match SendMessageW(h.pca_mode, 0x0147, WPARAM(0), LPARAM(0)).0 {
-                1 => lr_core::boot_pca::BootPcaMode::Pca2011,
-                2 => lr_core::boot_pca::BootPcaMode::Pca2023,
-                _ => lr_core::boot_pca::BootPcaMode::Auto,
-            };
+        Some(InstallControlSnapshot {
+            format_partition: checked(h.format),
+            repair_boot: checked(h.boot),
+            unattended_install: checked(h.unattend),
+            auto_reboot: checked(h.reboot),
+            run_diskpart_scripts: checked(h.run_diskpart),
+            driver_index: SendMessageW(h.driver, 0x0147, WPARAM(0), LPARAM(0)).0,
+            boot_mode_index: SendMessageW(h.boot_mode, 0x0147, WPARAM(0), LPARAM(0)).0,
+            pca_mode_index: SendMessageW(h.pca_mode, 0x0147, WPARAM(0), LPARAM(0)).0,
+        })
+    }
+
+    unsafe fn sync_install_preferences_from_controls(&mut self) {
+        if let Some(snapshot) = self.install_control_snapshot() {
+            snapshot.apply_to(&mut self.app_config.install_prefs);
+        }
+    }
+
+    unsafe fn persist_install_preferences(&mut self) {
+        self.sync_install_preferences_from_controls();
         if let Err(error) = self.app_config.save() {
             log::warn!("保存原生 UI 安装偏好失败: {error}");
         }
@@ -3802,10 +3890,9 @@ impl NativeWindow {
             if let Err(error) = self.app_config.save() {
                 log::warn!("保存高级选项失败: {error}");
             }
-            // Keep `advanced_visible` true until `select_page_impl` has captured the transition
-            // source.  Clearing it here made `returning_from_advanced` permanently false, so the
-            // complete Install geometry was never restored until toggling Unattended happened to
-            // request another layout pass.
+            // `select_page_impl` rebuilds the inventory-dependent Install geometry before it
+            // publishes the page. Keep the advanced flag set until that transaction has hidden
+            // the embedded page and restored the ordinary Install controls.
             self.select_page(hwnd, Page::Install);
             return;
         }
@@ -3885,34 +3972,13 @@ impl NativeWindow {
         }
     }
 
-    unsafe fn update_install_primary_state(&self) {
+    unsafe fn update_install_primary_state(&mut self) {
+        // Programmatic defaults (CB_SETCURSEL/BM_SETCHECK) do not emit CBN_SELCHANGE or
+        // BN_CLICKED. Synchronize the visible controls first so the enabled state and the click
+        // path both use the same current preferences even before the user touches a ComboBox.
+        self.sync_install_preferences_from_controls();
+        let enabled = self.install_intent().is_ok();
         let Some(h) = &self.handles else { return };
-        let image_path = self.effective_image_path.as_deref().unwrap_or_default();
-        let is_ghost = std::path::Path::new(image_path)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| {
-                matches!(extension.to_ascii_lowercase().as_str(), "gho" | "ghs")
-            });
-        let has_image = self.xp_i386_source.is_some()
-            || (!image_path.trim().is_empty()
-                && (is_ghost || SendMessageW(h.image_volume, 0x0147, WPARAM(0), LPARAM(0)).0 >= 0));
-        let selected_row = SendMessageW(h.partitions, 0x100C, WPARAM(usize::MAX), LPARAM(2)).0;
-        let pe_ready = !self
-            .selected_install_target()
-            .is_some_and(|target| target.is_current_system)
-            || crate::core::disk::DiskManager::is_pe_environment()
-            || SendMessageW(h.pe, 0x0147, WPARAM(0), LPARAM(0)).0 >= 0;
-        let pca_relevant = self.pca_selection_is_relevant();
-        let pca_ready = !pca_relevant
-            || (!self.pca_detection_pending
-                && !self.pca_target_detection_pending
-                && self.pca_selection_error().is_none());
-        let enabled = has_image
-            && selected_row >= 0
-            && pe_ready
-            && pca_ready
-            && self.custom_unattend_error.is_none();
         if IsWindowEnabled(h.primary).as_bool() != enabled {
             let _ = EnableWindow(h.primary, enabled);
             let _ = InvalidateRect(h.primary, None, false);

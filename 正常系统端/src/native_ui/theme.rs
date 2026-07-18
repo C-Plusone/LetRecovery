@@ -8,13 +8,13 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC,
-    CreateDIBSection, CreatePen, CreateRectRgn, CreateSolidBrush, DeleteDC, DeleteObject,
-    DrawTextW, EndPaint, FillRect, GdiFlush, GetTextMetricsW, GetWindowDC, InvalidateRect,
-    RedrawWindow, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetDIBitsToDevice,
-    SetStretchBltMode, SetTextColor, SetWindowRgn, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER,
-    BI_RGB, DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE,
-    DT_VCENTER, DT_WORDBREAK, HALFTONE, HBRUSH, HDC, PAINTSTRUCT, PEN_STYLE, RDW_ERASE, RDW_FRAME,
-    RDW_INVALIDATE, RDW_NOERASE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
+    CreateDIBSection, CreatePen, CreateRectRgn, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint,
+    FillRect, GdiFlush, GetTextMetricsW, GetWindowDC, InvalidateRect, RedrawWindow, ReleaseDC,
+    RoundRect, SelectObject, SetBkMode, SetDIBitsToDevice, SetStretchBltMode, SetTextColor,
+    SetWindowRgn, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, DT_CENTER,
+    DT_END_ELLIPSIS, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, HALFTONE,
+    HBRUSH, HDC, PAINTSTRUCT, PEN_STYLE, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_NOERASE,
+    RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::UI::Controls::{
     GetComboBoxInfo, SetWindowTheme, CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDRF_DODEFAULT,
@@ -2232,11 +2232,16 @@ unsafe fn paint_single_line_edit_client_atomic(hwnd: HWND, palette: Palette) {
             let background = CreateSolidBrush(palette.edit);
             let _ = FillRect(buffer_dc, &client, background);
             let _ = DeleteObject(background);
-            // The native Edit remains the input, text-buffer, caret, IME, selection and
-            // accessibility owner. Only its final visible text is rasterized into the same opaque
-            // BGRA frame as the field: GDI glyphs painted directly into a full-client DWM frame
-            // otherwise become the glass key on supported light-Mica builds.
-            paint_single_line_edit_text_to_dc(hwnd, buffer_dc, client, palette);
+            // Ask USER32 to draw the current visible Edit state into the same opaque surface. This
+            // preserves horizontal scrolling, selection, caret-related text positioning and IME
+            // composition; manually drawing GetWindowText from x=0 duplicates or shifts the text
+            // as soon as the native Edit scrolls while the user is typing.
+            let _ = DefSubclassProc(
+                hwnd,
+                WM_PRINTCLIENT,
+                WPARAM(buffer_dc.0 as usize),
+                LPARAM(PRF_CLIENT),
+            );
             let _ = GdiFlush();
             // GDI leaves the alpha byte undefined/zero. On an extended DWM frame that turns the
             // correctly black light-theme glyphs into transparent holes. The complete Edit client
@@ -2280,38 +2285,6 @@ unsafe fn paint_single_line_edit_client_atomic(hwnd: HWND, palette: Palette) {
         }
     }
     let _ = EndPaint(hwnd, &paint);
-}
-
-unsafe fn paint_single_line_edit_text_to_dc(
-    hwnd: HWND,
-    dc: HDC,
-    mut client: RECT,
-    palette: Palette,
-) {
-    let length = GetWindowTextLengthW(hwnd).max(0) as usize;
-    let mut text = vec![0u16; length + 1];
-    let copied = GetWindowTextW(hwnd, &mut text).max(0) as usize;
-    text.truncate(copied);
-    if text.is_empty() {
-        return;
-    }
-    let font = SendMessageW(hwnd, WM_GETFONT, WPARAM(0), LPARAM(0));
-    let old_font = (font.0 != 0)
-        .then(|| SelectObject(dc, windows::Win32::Graphics::Gdi::HGDIOBJ(font.0 as *mut _)));
-    let _ = SetBkMode(dc, TRANSPARENT);
-    let _ = SetTextColor(dc, palette.edit_text_color_for(hwnd));
-    let dpi = GetDpiForWindow(hwnd).max(96);
-    client.left += scale(8, dpi);
-    client.right -= scale(8, dpi);
-    let _ = DrawTextW(
-        dc,
-        &mut text,
-        &mut client,
-        DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-    );
-    if let Some(old_font) = old_font {
-        let _ = SelectObject(dc, old_font);
-    }
 }
 
 unsafe extern "system" fn combo_selection_item_subclass(

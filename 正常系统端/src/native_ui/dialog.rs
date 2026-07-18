@@ -21,7 +21,9 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{SetWindowTheme, DRAWITEMSTRUCT, HDITEMW, HDI_TEXT, ODT_HEADER};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus, VK_ESCAPE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetActiveWindow, SetFocus, VK_ESCAPE,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumChildWindows,
     EnumThreadWindows, GetClassNameW, GetClientRect, GetMessageW, GetParent, GetWindowLongPtrW,
@@ -672,12 +674,24 @@ impl DialogShell {
         if self.state.result.is_some() {
             return;
         }
+        let opening_hidden = !IsWindowVisible(self.state.hwnd).as_bool();
+        if opening_hidden {
+            // A newly-created tool is about to become the active foreground window. Resolve its
+            // requested material while it is still hidden, otherwise its descendants are prepared
+            // with the inactive solid palette and only acquire Mica after the first focus cycle.
+            self.state.window_active = true;
+            self.state.refresh_palette_and_backdrop();
+        }
         // Tool-specific controls are created after the shell. Prepare every descendant while the
         // top-level window is still hidden, so USER32 never exposes the common-control defaults
         // (white empty ListView bodies, black header/check text, or the default GUI font).
         prepare_dialog_descendants(&self.state);
         let first_visible_frame = self.state.first_presentation_pending;
         let _ = ShowWindow(self.state.hwnd, SW_SHOW);
+        // SW_SHOW may be denied activation by the foreground lock or by a modal owner. Correct the
+        // optimistic hidden-state palette synchronously before publishing the complete tree.
+        let actually_active = GetActiveWindow() == self.state.hwnd;
+        self.state.refresh_window_activation(actually_active);
         if first_visible_frame {
             // Paint the complete dialog once before the owner starts its asynchronous inventory.
             // Otherwise USER32 can expose unpainted white ListView/button child surfaces until
