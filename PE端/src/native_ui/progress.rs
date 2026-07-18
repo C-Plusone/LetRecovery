@@ -63,6 +63,7 @@ const MIN_HEIGHT: i32 = 430;
 const PREFERRED_WIDTH: i32 = 480;
 const PREFERRED_HEIGHT: i32 = 440;
 const SS_CENTER_STYLE: u32 = 0x0000_0001;
+const SS_RIGHT_STYLE: u32 = 0x0000_0002;
 const SS_CENTERIMAGE_STYLE: u32 = 0x0000_0200;
 
 #[derive(Debug)]
@@ -228,12 +229,12 @@ struct NativeProgressWindow {
     theme: ThemeContext,
     brushes: ThemeBrushes,
     body_font: HFONT,
+    progress_caption_font: HFONT,
     title_font: HFONT,
     title: HWND,
     subtitle: HWND,
-    step_percent: HWND,
+    step_caption: HWND,
     overall_caption: HWND,
-    overall_percent: HWND,
     status: HWND,
     back: HWND,
     details_button: HWND,
@@ -286,12 +287,12 @@ impl NativeProgressWindow {
             theme,
             brushes: ThemeBrushes::new(theme.palette),
             body_font: create_ui_font(dpi, 10),
+            progress_caption_font: create_ui_font(dpi, 9),
             title_font: create_ui_font_for_role(dpi, 16, UiFontRole::Heading),
             title: HWND::default(),
             subtitle: HWND::default(),
-            step_percent: HWND::default(),
+            step_caption: HWND::default(),
             overall_caption: HWND::default(),
-            overall_percent: HWND::default(),
             status: HWND::default(),
             back: HWND::default(),
             details_button: HWND::default(),
@@ -311,9 +312,9 @@ impl NativeProgressWindow {
         self.title =
             create_centered_static(hwnd, 2101, &progress_title(self.presentation.workflow))?;
         self.subtitle = HWND::default();
-        self.step_percent = create_static(hwnd, 2104, "0%")?;
-        self.overall_caption = create_static(hwnd, 2105, &crate::tr!("总体进度"))?;
-        self.overall_percent = create_static(hwnd, 2106, "0%")?;
+        self.step_caption = create_progress_caption_static(hwnd, 2103, &crate::tr!("步骤进度:"))?;
+        self.overall_caption =
+            create_progress_caption_static(hwnd, 2105, &crate::tr!("总体进度:"))?;
         // The progress page is deliberately read-only and compact. Detailed diagnostics remain in
         // the log instead of a disabled multiline Edit that looks interactive in WinPE.
         self.status = HWND::default();
@@ -368,14 +369,6 @@ impl NativeProgressWindow {
     }
 
     unsafe fn render_full_presentation(&self, hwnd: HWND) {
-        set_text(
-            self.step_percent,
-            &format!("{}%", self.presentation.step_progress),
-        );
-        set_text(
-            self.overall_percent,
-            &format!("{}%", self.presentation.overall_progress),
-        );
         let status = if self.presentation.status.is_empty() {
             terminal_status_text(self.presentation.terminal)
         } else {
@@ -399,17 +392,19 @@ impl NativeProgressWindow {
                 LPARAM(1),
             );
         }
-        for control in [
-            self.subtitle,
-            self.step_percent,
-            self.overall_caption,
-            self.overall_percent,
-            self.back,
-            self.details_button,
-            self.close,
-        ]
-        .into_iter()
-        .chain(self.row_labels.iter().copied())
+        for control in [self.step_caption, self.overall_caption] {
+            if !control.0.is_null() {
+                let _ = SendMessageW(
+                    control,
+                    WM_SETFONT,
+                    WPARAM(self.progress_caption_font.0 as usize),
+                    LPARAM(1),
+                );
+            }
+        }
+        for control in [self.subtitle, self.back, self.details_button, self.close]
+            .into_iter()
+            .chain(self.row_labels.iter().copied())
         {
             if !control.0.is_null() {
                 let _ = SendMessageW(
@@ -428,8 +423,10 @@ impl NativeProgressWindow {
     unsafe fn refresh_dpi(&mut self, hwnd: HWND, dpi: u32) {
         self.theme = ThemeContext::new(self.theme.mode, dpi.max(96));
         let _ = DeleteObject(self.body_font);
+        let _ = DeleteObject(self.progress_caption_font);
         let _ = DeleteObject(self.title_font);
         self.body_font = create_ui_font(dpi.max(96), 10);
+        self.progress_caption_font = create_ui_font(dpi.max(96), 9);
         self.title_font = create_ui_font_for_role(dpi.max(96), 16, UiFontRole::Heading);
         self.apply_fonts();
         self.layout(hwnd);
@@ -463,11 +460,9 @@ impl NativeProgressWindow {
 
     unsafe fn apply_presentation(&mut self, hwnd: HWND, next: ProgressPresentation) {
         if self.presentation.step_progress != next.step_progress {
-            set_text(self.step_percent, &format!("{}%", next.step_progress));
             let _ = InvalidateRect(hwnd, Some(&self.step_bar), false);
         }
         if self.presentation.overall_progress != next.overall_progress {
-            set_text(self.overall_percent, &format!("{}%", next.overall_progress));
             let _ = InvalidateRect(hwnd, Some(&self.overall_bar), false);
         }
         if self.presentation.status != next.status || self.presentation.terminal != next.terminal {
@@ -546,9 +541,8 @@ impl NativeProgressWindow {
         for control in [
             self.title,
             self.subtitle,
-            self.step_percent,
+            self.step_caption,
             self.overall_caption,
-            self.overall_percent,
         ]
         .into_iter()
         .chain(self.row_labels.iter().copied())
@@ -628,10 +622,18 @@ impl NativeProgressWindow {
         let width = (client.right - client.left).max(1);
         let height = (client.bottom - client.top).max(1);
         let has_step = self.presentation.workflow != WorkflowKind::Expand;
+        let caption_width = progress_caption_width(
+            hwnd,
+            self.progress_caption_font,
+            self.theme.dpi,
+            (width / 3).max(1),
+            has_step,
+        );
         let layout = progress_geometry(
             width,
             height,
             self.theme.dpi,
+            caption_width,
             has_step,
             self.presentation.rows.len(),
             self.state.page != NativePage::Progress,
@@ -643,17 +645,16 @@ impl NativeProgressWindow {
         } else {
             let _ = ShowWindow(self.subtitle, SW_HIDE);
         }
-        if let (Some(percent), Some(bar)) = (layout.step_percent, layout.step_bar) {
-            move_pixel_control(self.step_percent, percent);
-            let _ = ShowWindow(self.step_percent, SW_SHOW);
+        if let (Some(caption), Some(bar)) = (layout.step_caption, layout.step_bar) {
+            move_pixel_control(self.step_caption, caption);
+            let _ = ShowWindow(self.step_caption, SW_SHOW);
             self.step_bar = pixel_rect(bar);
         } else {
-            move_control(self.step_percent, 0, 0, 0, 0);
-            let _ = ShowWindow(self.step_percent, SW_HIDE);
+            move_control(self.step_caption, 0, 0, 0, 0);
+            let _ = ShowWindow(self.step_caption, SW_HIDE);
             self.step_bar = RECT::default();
         }
         move_pixel_control(self.overall_caption, layout.overall_caption);
-        move_pixel_control(self.overall_percent, layout.overall_percent);
         self.overall_bar = pixel_rect(layout.overall_bar);
         let line_height = layout.row_height;
         let per_column = (layout.rows.height / line_height).max(0) as usize;
@@ -773,6 +774,7 @@ impl Drop for NativeProgressWindow {
     fn drop(&mut self) {
         unsafe {
             let _ = DeleteObject(self.body_font);
+            let _ = DeleteObject(self.progress_caption_font);
             let _ = DeleteObject(self.title_font);
         }
     }
@@ -940,24 +942,6 @@ fn step_status_icon(status: StepStatus) -> StepStatusIcon {
     }
 }
 
-unsafe fn create_static(parent: HWND, id: u16, text: &str) -> windows::core::Result<HWND> {
-    let text = wide(text);
-    CreateWindowExW(
-        WINDOW_EX_STYLE(0),
-        w!("STATIC"),
-        PCWSTR(text.as_ptr()),
-        WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0),
-        0,
-        0,
-        0,
-        0,
-        parent,
-        HMENU(id as isize as *mut _),
-        HINSTANCE::default(),
-        None,
-    )
-}
-
 unsafe fn create_centered_static(parent: HWND, id: u16, text: &str) -> windows::core::Result<HWND> {
     let text = wide(text);
     CreateWindowExW(
@@ -994,6 +978,28 @@ unsafe fn create_row_static(parent: HWND, id: u16, text: &str) -> windows::core:
     )
 }
 
+unsafe fn create_progress_caption_static(
+    parent: HWND,
+    id: u16,
+    text: &str,
+) -> windows::core::Result<HWND> {
+    let text = wide(text);
+    CreateWindowExW(
+        WINDOW_EX_STYLE(0),
+        w!("STATIC"),
+        PCWSTR(text.as_ptr()),
+        WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | SS_RIGHT_STYLE | SS_CENTERIMAGE_STYLE),
+        0,
+        0,
+        0,
+        0,
+        parent,
+        HMENU(id as isize as *mut _),
+        HINSTANCE::default(),
+        None,
+    )
+}
+
 unsafe fn set_text(control: HWND, text: &str) {
     if !control.0.is_null() {
         let text = wide(text);
@@ -1018,6 +1024,32 @@ fn pixel_rect(rect: PixelRect) -> RECT {
         right: rect.right(),
         bottom: rect.bottom(),
     }
+}
+
+unsafe fn progress_caption_width(
+    hwnd: HWND,
+    font: HFONT,
+    dpi: u32,
+    maximum: i32,
+    has_step: bool,
+) -> i32 {
+    let maximum = maximum.max(1);
+    let button_padding = scaled(24, dpi);
+    let measure = |text: String| {
+        measured_button_width(
+            hwnd,
+            font,
+            &text,
+            dpi,
+            maximum.saturating_add(button_padding),
+        )
+        .saturating_sub(button_padding)
+    };
+    let mut width = measure(crate::tr!("总体进度:"));
+    if has_step {
+        width = width.max(measure(crate::tr!("步骤进度:")));
+    }
+    width.clamp(1, maximum)
 }
 
 fn detail_page_label(page: NativePage) -> String {
@@ -1219,39 +1251,30 @@ unsafe extern "system" fn window_proc(
                         }
                     }
                 }
-                let mut client = RECT::default();
-                let _ = GetClientRect(hwnd, &mut client);
-                let layout = progress_geometry(
-                    client.right,
-                    client.bottom,
-                    window.theme.dpi,
-                    window.presentation.workflow != WorkflowKind::Expand,
-                    window.presentation.rows.len(),
-                    window.state.page != NativePage::Progress,
-                );
-                let command_top = layout.command.y;
-                let separator_brush =
-                    windows::Win32::Graphics::Gdi::CreateSolidBrush(window.theme.palette.separator);
-                if window.state.page == NativePage::Progress && layout.rows.height > 0 {
-                    let list_separator_y = layout.rows.y - scaled(9, window.theme.dpi);
-                    let list_separator = RECT {
-                        left: layout.pad,
-                        top: list_separator_y,
-                        right: client.right - layout.pad,
-                        bottom: list_separator_y + window.theme.metrics.separator_thickness,
-                    };
-                    let _ = FillRect(dc, &list_separator, separator_brush);
-                }
                 if window.state.page != NativePage::Progress {
+                    let mut client = RECT::default();
+                    let _ = GetClientRect(hwnd, &mut client);
+                    let layout = progress_geometry(
+                        client.right,
+                        client.bottom,
+                        window.theme.dpi,
+                        scaled(52, window.theme.dpi),
+                        window.presentation.workflow != WorkflowKind::Expand,
+                        window.presentation.rows.len(),
+                        true,
+                    );
+                    let separator_brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(
+                        window.theme.palette.separator,
+                    );
                     let separator = RECT {
                         left: 0,
-                        top: command_top,
+                        top: layout.command.y,
                         right: client.right,
-                        bottom: command_top + window.theme.metrics.separator_thickness,
+                        bottom: layout.command.y + window.theme.metrics.separator_thickness,
                     };
                     let _ = FillRect(dc, &separator, separator_brush);
+                    let _ = DeleteObject(separator_brush);
                 }
-                let _ = DeleteObject(separator_brush);
                 let _ = EndPaint(hwnd, &paint);
                 return LRESULT(0);
             }
@@ -1282,6 +1305,7 @@ mod tests {
     fn default_progress_window_is_compact_and_row_text_is_vertically_centered() {
         assert_eq!((PREFERRED_WIDTH, PREFERRED_HEIGHT), (480, 440));
         assert_eq!((MIN_WIDTH, MIN_HEIGHT), (440, 430));
+        assert_eq!(SS_RIGHT_STYLE, 0x0000_0002);
         assert_eq!(SS_CENTERIMAGE_STYLE, 0x0000_0200);
     }
 

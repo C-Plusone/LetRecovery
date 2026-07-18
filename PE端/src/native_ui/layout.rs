@@ -24,10 +24,9 @@ pub(crate) struct ProgressGeometry {
     pub row_height: i32,
     pub title: PixelRect,
     pub subtitle: Option<PixelRect>,
-    pub step_percent: Option<PixelRect>,
+    pub step_caption: Option<PixelRect>,
     pub step_bar: Option<PixelRect>,
     pub overall_caption: PixelRect,
-    pub overall_percent: PixelRect,
     pub overall_bar: PixelRect,
     pub rows: PixelRect,
     pub status: PixelRect,
@@ -38,6 +37,7 @@ pub(crate) fn progress_geometry(
     width: i32,
     height: i32,
     dpi: u32,
+    progress_caption_width: i32,
     has_step: bool,
     row_count: usize,
     reserve_command_bar: bool,
@@ -50,7 +50,7 @@ pub(crate) fn progress_geometry(
     let pad = (width - content_width) / 2;
     let top = scale(16).min(24);
     let gap = scale(6).min(12);
-    let line_height = scale(22);
+    let progress_row_height = scale(30);
     let row_height = scale(24);
     let title_height = scale(40);
     let subtitle_height = scale(22);
@@ -69,14 +69,19 @@ pub(crate) fn progress_geometry(
         height: height - command_top,
     };
 
-    let progress_group_height = line_height + gap + bar_height;
+    let progress_group_height = progress_row_height;
     let status_minimum = minimum_status_height(dpi).min((command_top - top).max(1));
-    let full_step_height = if has_step { line_height + gap } else { 0 };
+    let full_step_height = if has_step {
+        progress_group_height + gap
+    } else {
+        0
+    };
     let full_mandatory_height =
         title_height + gap + full_step_height + progress_group_height + gap + status_minimum;
     let content_budget = (command_top - top - gap).max(1);
     let compact_step = has_step && content_budget < full_mandatory_height;
     let flow_gap = if compact_step { scale(4).min(8) } else { gap };
+    let label_gap = scale(3).min(6);
     // The running page deliberately omits the redundant "do not close" subtitle. Keeping this
     // geometry slot disabled also keeps the live step bar close to the title instead of leaving an
     // unexplained blank row.
@@ -100,57 +105,36 @@ pub(crate) fn progress_geometry(
         rect
     });
 
-    let percent_width = scale(48).min((content_width / 4).max(1));
+    let caption_width = progress_caption_width
+        .max(1)
+        .min((content_width / 3).max(1));
     let group = |y: i32| {
         let caption = PixelRect {
             x: pad,
             y,
-            width: content_width,
-            height: line_height,
+            width: caption_width,
+            height: progress_row_height,
         };
-        let bar_y = y + line_height + flow_gap;
         let bar = PixelRect {
-            x: pad,
-            y: bar_y,
-            width: (content_width - percent_width - flow_gap).max(1),
+            x: caption.right() + label_gap,
+            y: y + (progress_row_height - bar_height).max(0) / 2,
+            width: (content_width - caption_width - label_gap).max(1),
             height: bar_height,
         };
-        let percent = PixelRect {
-            x: bar.right() + flow_gap,
-            y: bar_y - (line_height - bar_height).max(0) / 2,
-            width: percent_width,
-            height: line_height,
-        };
-        (caption, percent, bar)
+        (caption, bar)
     };
 
-    let step_group = |y: i32| {
-        let bar = PixelRect {
-            x: pad,
-            y: y + (line_height - bar_height).max(0) / 2,
-            width: (content_width - percent_width - flow_gap).max(1),
-            height: bar_height,
-        };
-        let percent = PixelRect {
-            x: bar.right() + flow_gap,
-            y,
-            width: percent_width,
-            height: line_height,
-        };
-        (percent, bar)
-    };
-
-    let (mut step_percent, mut step_bar) = if has_step && compact_step {
+    let (mut step_caption, mut step_bar) = if has_step && compact_step {
         (None, None)
     } else if has_step {
-        let (percent, bar) = step_group(cursor);
-        cursor += line_height + flow_gap;
-        (Some(percent), Some(bar))
+        let (caption, bar) = group(cursor);
+        cursor = caption.bottom() + flow_gap;
+        (Some(caption), Some(bar))
     } else {
         (None, None)
     };
-    let (mut overall_caption, mut overall_percent, mut overall_bar) = group(cursor);
-    cursor = overall_bar.bottom();
+    let (mut overall_caption, mut overall_bar) = group(cursor);
+    cursor = overall_caption.bottom();
 
     let status_bottom = if reserve_command_bar {
         (command_top - flow_gap).max(cursor)
@@ -190,14 +174,13 @@ pub(crate) fn progress_geometry(
     if let Some(rect) = &mut subtitle {
         shift(rect);
     }
-    if let Some(rect) = &mut step_percent {
+    if let Some(rect) = &mut step_caption {
         shift(rect);
     }
     if let Some(rect) = &mut step_bar {
         shift(rect);
     }
     shift(&mut overall_caption);
-    shift(&mut overall_percent);
     shift(&mut overall_bar);
     let rows = PixelRect {
         x: pad,
@@ -211,10 +194,9 @@ pub(crate) fn progress_geometry(
         row_height,
         title,
         subtitle,
-        step_percent,
+        step_caption,
         step_bar,
         overall_caption,
-        overall_percent,
         overall_bar,
         rows,
         status,
@@ -395,13 +377,21 @@ mod tests {
             for dpi in DPIS {
                 for has_step in [false, true] {
                     let row_count = if has_step { 11 } else { 0 };
-                    let layout = progress_geometry(width, height, dpi, has_step, row_count, true);
+                    let layout = progress_geometry(
+                        width,
+                        height,
+                        dpi,
+                        scaled(52, dpi),
+                        has_step,
+                        row_count,
+                        true,
+                    );
                     assert!(layout.title.bottom() <= layout.command.y);
                     assert!(layout.overall_bar.bottom() <= layout.rows.y);
                     assert!(layout.status.bottom() <= layout.command.y);
                     assert_eq!(layout.status.height, 0);
                     assert!(layout.rows.bottom() <= layout.command.y);
-                    assert_eq!(layout.step_bar.is_some(), layout.step_percent.is_some());
+                    assert_eq!(layout.step_bar.is_some(), layout.step_caption.is_some());
                     if let Some(subtitle) = layout.subtitle {
                         assert!(subtitle.bottom() <= layout.overall_caption.y);
                     }
@@ -413,7 +403,7 @@ mod tests {
     #[test]
     fn roomy_progress_page_centers_the_complete_workflow_block() {
         let dpi = 144;
-        let layout = progress_geometry(1180, 846, dpi, true, 11, false);
+        let layout = progress_geometry(1180, 846, dpi, scaled(52, dpi), true, 11, false);
 
         assert_eq!(layout.rows.height, scaled(24, dpi) * 11);
         assert!(layout.title.y > scaled(16, dpi).min(24));
@@ -426,10 +416,18 @@ mod tests {
     #[test]
     fn compact_default_progress_client_keeps_install_steps_in_one_column() {
         let dpi = 144;
-        let layout = progress_geometry(700, 606, dpi, true, 10, false);
+        let layout = progress_geometry(700, 606, dpi, scaled(52, dpi), true, 10, false);
 
         assert_eq!(layout.rows.height, scaled(24, dpi) * 10);
         assert!(layout.rows.bottom() <= 606);
+        let step_caption = layout.step_caption.expect("step caption");
+        let step_bar = layout.step_bar.expect("step bar");
+        assert_eq!(step_bar.x, layout.overall_bar.x);
+        assert_eq!(step_bar.width, layout.overall_bar.width);
+        assert_eq!(step_bar.height, scaled(10, dpi));
+        assert_eq!(step_caption.x, layout.overall_caption.x);
+        assert_eq!(step_caption.width, layout.overall_caption.width);
+        assert_eq!(step_bar.x - step_caption.right(), scaled(3, dpi).min(6));
     }
 
     #[test]
@@ -489,7 +487,7 @@ mod tests {
     fn command_buttons_and_footer_never_overlap_in_the_low_size_dpi_matrix() {
         for (width, height) in SIZES {
             for dpi in DPIS {
-                let layout = progress_geometry(width, height, dpi, true, 11, true);
+                let layout = progress_geometry(width, height, dpi, scaled(52, dpi), true, 11, true);
                 let command = command_bar_geometry(
                     layout.command,
                     layout.pad,
