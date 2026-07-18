@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, DeleteObject, EndPaint, FillRect, GetDC, InvalidateRect, ReleaseDC, SetBkColor,
-    SetBkMode, SetTextColor, HBRUSH, HDC, HFONT, PAINTSTRUCT, TRANSPARENT,
+    BeginPaint, DeleteObject, EndPaint, FillRect, GdiFlush, GetDC, InvalidateRect, ReleaseDC,
+    SetBkColor, SetBkMode, SetTextColor, HBRUSH, HDC, HFONT, PAINTSTRUCT, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -20,16 +20,18 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
-    GetSystemMetrics, GetWindowLongPtrW, KillTimer, LoadCursorW, MoveWindow, PeekMessageW,
-    PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, TranslateMessage, BN_CLICKED, CREATESTRUCTW, CS_HREDRAW,
-    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW, MINMAXINFO, MSG, PM_REMOVE,
-    SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NCCREATE, WM_PAINT, WM_QUIT,
-    WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_EX_DLGMODALFRAME, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, EnableMenuItem,
+    GetClientRect, GetMessageW, GetSystemMenu, GetSystemMetrics, GetWindowLongPtrW, KillTimer,
+    LoadCursorW, MoveWindow, PeekMessageW, PostQuitMessage, RegisterClassExW, SendMessageW,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+    BN_CLICKED, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU,
+    IDC_ARROW, MF_BYCOMMAND, MF_DISABLED, MF_ENABLED, MF_GRAYED, MINMAXINFO, MSG, PM_REMOVE,
+    SC_CLOSE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO,
+    WM_NCCREATE, WM_PAINT, WM_QUIT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CHILD,
+    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_DLGMODALFRAME, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW,
+    WS_VISIBLE,
 };
 
 use crate::app::{WorkflowRecoverySnapshot, WorkflowSession};
@@ -44,7 +46,7 @@ use super::controls::{
 use super::details::{page_content, AdvancedOptionsSummary, DetailsPane};
 use super::layout::{command_bar_geometry, progress_geometry, PixelRect};
 use super::state::{NativePage, NativeWindowState, WorkflowKind};
-use super::theme::{ThemeBrushes, ThemeContext};
+use super::theme::{Palette, ThemeBrushes, ThemeContext};
 use super::window::{
     apply_title_bar_theme, clamp_window_to_work_area, drain_pending_quit_message,
     fit_window_to_work_area, monitor_work_area, scaled,
@@ -65,6 +67,12 @@ const PREFERRED_HEIGHT: i32 = 440;
 const SS_CENTER_STYLE: u32 = 0x0000_0001;
 const SS_RIGHT_STYLE: u32 = 0x0000_0002;
 const SS_CENTERIMAGE_STYLE: u32 = 0x0000_0200;
+
+fn progress_window_style() -> WINDOW_STYLE {
+    WINDOW_STYLE(
+        (WS_OVERLAPPEDWINDOW.0 & !WS_MAXIMIZEBOX.0) | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0,
+    )
+}
 
 #[derive(Debug)]
 pub struct ProgressRunError {
@@ -257,23 +265,7 @@ impl NativeProgressWindow {
         start_worker: bool,
         preview_state: PreviewState,
     ) -> Self {
-        let mut progress = initial_progress(operation_type);
-        if !start_worker {
-            match operation_type {
-                OperationType::Install => progress.set_install_step(InstallStep::ApplyImage),
-                OperationType::Backup => progress.set_backup_step(BackupStep::CaptureImage),
-                OperationType::Expand => {}
-            }
-            progress.set_step_progress(match preview_state {
-                PreviewState::Running => 5,
-                #[cfg(feature = "non-elevated-tests")]
-                PreviewState::Failed => 42,
-            });
-            #[cfg(feature = "non-elevated-tests")]
-            if preview_state == PreviewState::Failed {
-                progress.mark_failed("UI preview failure");
-            }
-        }
+        let progress = launch_progress(operation_type, start_worker, preview_state);
         let presentation = ProgressPresentation::from_state(&progress);
         let mut state = NativeWindowState::new(None);
         state.navigate(NativePage::Progress);
@@ -365,6 +357,7 @@ impl NativeProgressWindow {
             session.start_worker();
             self.state.workflow = Some(session);
         }
+        self.synchronize_close_affordances(hwnd);
         Ok(())
     }
 
@@ -450,6 +443,7 @@ impl NativeProgressWindow {
         self.apply_presentation(hwnd, next);
         if worker_state_changed {
             let _ = EnableWindow(self.close, self.can_close());
+            self.synchronize_close_affordances(hwnd);
             let _ = InvalidateRect(hwnd, None, false);
         }
         if self.state.page == NativePage::Recovery && (worker_state_changed || presentation_changed)
@@ -491,12 +485,27 @@ impl NativeProgressWindow {
         }
         self.presentation = next;
         if terminal_changed {
+            self.synchronize_close_affordances(hwnd);
             self.update_command_bar();
         }
     }
 
     fn can_close(&self) -> bool {
         self.presentation.terminal != ProgressTerminal::Running && self.worker_finished
+    }
+
+    unsafe fn synchronize_close_affordances(&self, hwnd: HWND) {
+        let system_menu = GetSystemMenu(hwnd, false);
+        if system_menu.0.is_null() {
+            return;
+        }
+        let state = if self.can_close() {
+            MF_BYCOMMAND | MF_ENABLED
+        } else {
+            MF_BYCOMMAND | MF_DISABLED | MF_GRAYED
+        };
+        let _ = EnableMenuItem(system_menu, SC_CLOSE, state);
+        let _ = DrawMenuBar(hwnd);
     }
 
     fn recovery_snapshot(&self) -> WorkflowRecoverySnapshot {
@@ -848,7 +857,7 @@ fn run_internal(
             WS_EX_DLGMODALFRAME,
             CLASS_NAME,
             PCWSTR(title.as_ptr()),
-            WINDOW_STYLE(WS_OVERLAPPEDWINDOW.0 | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0),
+            progress_window_style(),
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             width,
@@ -916,6 +925,32 @@ fn initial_progress(operation_type: OperationType) -> ProgressState {
     }
 }
 
+fn launch_progress(
+    operation_type: OperationType,
+    start_worker: bool,
+    preview_state: PreviewState,
+) -> ProgressState {
+    let mut progress = initial_progress(operation_type);
+    if start_worker {
+        return progress;
+    }
+    match operation_type {
+        OperationType::Install => progress.set_install_step(InstallStep::ApplyImage),
+        OperationType::Backup => progress.set_backup_step(BackupStep::CaptureImage),
+        OperationType::Expand => {}
+    }
+    progress.set_step_progress(match preview_state {
+        PreviewState::Running => 5,
+        #[cfg(feature = "non-elevated-tests")]
+        PreviewState::Failed => 42,
+    });
+    #[cfg(feature = "non-elevated-tests")]
+    if preview_state == PreviewState::Failed {
+        progress.mark_failed("UI preview failure");
+    }
+    progress
+}
+
 fn progress_title(workflow: WorkflowKind) -> String {
     match workflow {
         WorkflowKind::Install => crate::tr!("LetRecovery PE 安装助手"),
@@ -939,6 +974,15 @@ fn step_status_icon(status: StepStatus) -> StepStatusIcon {
         StepStatus::InProgress => StepStatusIcon::Current,
         StepStatus::Completed => StepStatusIcon::Success,
         StepStatus::Failed => StepStatusIcon::Error,
+    }
+}
+
+fn step_text_color(status: StepStatus, palette: Palette) -> windows::Win32::Foundation::COLORREF {
+    match status {
+        StepStatus::Completed => palette.progress,
+        StepStatus::InProgress => palette.accent_border,
+        StepStatus::Failed => palette.error,
+        StepStatus::Pending => palette.text_secondary,
     }
 }
 
@@ -1092,6 +1136,10 @@ unsafe extern "system" fn window_proc(
                     && window.presentation.terminal == ProgressTerminal::Running
                     && window.spinner_rect.right > window.spinner_rect.left
                 {
+                    // The 16 px parent-owned status slot is not a child HWND, and WinPE can omit
+                    // its tiny invalid region from the composed parent paint. Draw the complete
+                    // opaque frame directly, then flush the GDI batch before releasing the DC so
+                    // every elapsed-time frame becomes visible in VMware as well as full Windows.
                     let dc = GetDC(hwnd);
                     if !dc.is_invalid() {
                         draw_indeterminate_ring(
@@ -1100,6 +1148,7 @@ unsafe extern "system" fn window_proc(
                             window.spinner_started.elapsed().as_secs_f64(),
                             window.theme.palette,
                         );
+                        let _ = GdiFlush();
                         let _ = ReleaseDC(hwnd, dc);
                     }
                 }
@@ -1192,12 +1241,7 @@ unsafe extern "system" fn window_proc(
                 } else if let Some(index) =
                     window.row_labels.iter().position(|label| *label == source)
                 {
-                    match window.presentation.rows[index].status {
-                        StepStatus::Completed => window.theme.palette.progress,
-                        StepStatus::InProgress => window.theme.palette.accent_border,
-                        StepStatus::Failed => window.theme.palette.error,
-                        StepStatus::Pending => window.theme.palette.text_secondary,
-                    }
+                    step_text_color(window.presentation.rows[index].status, window.theme.palette)
                 } else {
                     window.theme.palette.text
                 };
@@ -1307,6 +1351,7 @@ mod tests {
         assert_eq!((MIN_WIDTH, MIN_HEIGHT), (440, 430));
         assert_eq!(SS_RIGHT_STYLE, 0x0000_0002);
         assert_eq!(SS_CENTERIMAGE_STYLE, 0x0000_0200);
+        assert_eq!(progress_window_style().0 & WS_MAXIMIZEBOX.0, 0);
     }
 
     #[test]
@@ -1365,5 +1410,24 @@ mod tests {
             crate::native_ui::theme::Palette::DARK.progress,
             crate::native_ui::theme::Palette::LIGHT.progress
         );
+        assert_eq!(
+            step_text_color(StepStatus::Completed, Palette::DARK),
+            Palette::DARK.progress
+        );
+        assert_eq!(
+            step_text_color(StepStatus::InProgress, Palette::DARK),
+            Palette::DARK.accent_border
+        );
+    }
+
+    #[test]
+    fn running_progress_preview_contains_the_real_animated_step() {
+        let state = launch_progress(OperationType::Install, false, PreviewState::Running);
+        let view = ProgressPresentation::from_state(&state);
+        assert_eq!(
+            view.rows[InstallStep::ApplyImage.index()].status,
+            StepStatus::InProgress
+        );
+        assert_eq!(view.terminal, ProgressTerminal::Running);
     }
 }

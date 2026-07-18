@@ -192,9 +192,10 @@ fn main() -> anyhow::Result<()> {
         log_file_path().display()
     );
 
-    // Deterministic, side-effect-free visual entry for the native PE progress shell. It must run
-    // before driver loading, BitLocker passthrough and task discovery so desktop QA cannot touch
-    // the host storage stack. Release builds do not contain this branch.
+    // Deterministic, side-effect-free visual entry for the native PE progress shell, including the
+    // same elapsed-time loading ring and paint timer used by the production page. It must run before
+    // driver loading, BitLocker passthrough and task discovery so desktop QA cannot touch the host
+    // storage stack. Release builds do not contain this branch.
     let args: Vec<String> = std::env::args().collect();
     #[cfg(feature = "non-elevated-tests")]
     if args.iter().any(|arg| arg == "--ui-progress-preview-failed") {

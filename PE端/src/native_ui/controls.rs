@@ -251,20 +251,36 @@ pub struct ProgressRingFrame {
     pub sweep_radians: f64,
 }
 
-/// Returns a continuous indeterminate-ring frame driven by elapsed wall-clock time.
+/// Returns the Cloud-MGR indeterminate-ring frame driven by elapsed wall-clock time.
 ///
-/// The arc rotates at a constant rate while its sweep uses cosine easing. It never collapses into
-/// a nearly invisible dot, and both values meet continuously at the loop boundary. Increasing
-/// angles move clockwise because screen Y grows downwards.
+/// This is the same two-second linear keyframe sequence as Cloud-MGR's vendored `ProgressRing`:
+/// the dash grows from 0.01 to 21.99 viewport units while rotating from 0 to 450 degrees, then
+/// shrinks to 0.01 while rotation continues to 1080 degrees. Increasing angles move clockwise
+/// because screen Y grows downwards.
 pub fn progress_ring_frame(elapsed_seconds: f64) -> ProgressRingFrame {
-    const PERIOD_SECONDS: f64 = 1.6;
-    const MIN_SWEEP: f64 = std::f64::consts::PI * 0.36;
-    const SWEEP_RANGE: f64 = std::f64::consts::PI * 1.04;
+    const PERIOD_SECONDS: f64 = 2.0;
+    const DASH_MIN: f64 = 0.01;
+    const DASH_HALF: f64 = 21.99;
+    const CIRCUMFERENCE: f64 = std::f64::consts::TAU * 7.0;
+    const ROTATION_MID_RADIANS: f64 = std::f64::consts::PI * 2.5;
+    const ROTATION_END_RADIANS: f64 = std::f64::consts::PI * 6.0;
     let phase = elapsed_seconds.rem_euclid(PERIOD_SECONDS) / PERIOD_SECONDS;
-    let eased = (1.0 - (phase * std::f64::consts::TAU).cos()) * 0.5;
+    let (dash, rotation) = if phase < 0.5 {
+        let progress = phase / 0.5;
+        (
+            DASH_MIN + (DASH_HALF - DASH_MIN) * progress,
+            ROTATION_MID_RADIANS * progress,
+        )
+    } else {
+        let progress = (phase - 0.5) / 0.5;
+        (
+            DASH_HALF + (DASH_MIN - DASH_HALF) * progress,
+            ROTATION_MID_RADIANS + (ROTATION_END_RADIANS - ROTATION_MID_RADIANS) * progress,
+        )
+    };
     ProgressRingFrame {
-        start_radians: phase * std::f64::consts::TAU - std::f64::consts::FRAC_PI_2,
-        sweep_radians: MIN_SWEEP + SWEEP_RANGE * eased,
+        start_radians: rotation - std::f64::consts::FRAC_PI_2,
+        sweep_radians: dash / CIRCUMFERENCE * std::f64::consts::TAU,
     }
 }
 
@@ -2043,13 +2059,18 @@ mod tests {
     }
 
     #[test]
-    fn progress_ring_is_continuous_and_never_collapses() {
+    fn progress_ring_matches_cloud_mgr_linear_keyframes() {
         let start = progress_ring_frame(0.0);
-        let midpoint = progress_ring_frame(0.8);
-        let repeated = progress_ring_frame(1.6);
+        let midpoint = progress_ring_frame(1.0);
+        let shrinking = progress_ring_frame(1.5);
+        let repeated = progress_ring_frame(2.0);
         assert!((start.start_radians + std::f64::consts::FRAC_PI_2).abs() < 1.0e-9);
-        assert!(start.sweep_radians > std::f64::consts::FRAC_PI_4);
+        assert!(start.sweep_radians > 0.0);
+        assert!(start.sweep_radians < 0.01);
         assert!(midpoint.sweep_radians > start.sweep_radians);
+        assert!((midpoint.start_radians - std::f64::consts::TAU).abs() < 1.0e-9);
+        assert!(shrinking.start_radians > midpoint.start_radians);
+        assert!(shrinking.sweep_radians < midpoint.sweep_radians);
         assert_eq!(start, repeated);
     }
 
