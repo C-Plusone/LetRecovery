@@ -1114,11 +1114,10 @@ impl AboutPage {
     }
 
     pub unsafe fn relocalize(&self, easy_mode_available: bool) {
+        set_text(self.product_name, &crate::build_info::product_name());
         set_text(self.version_label, &crate::tr!("版本:"));
-        set_text(
-            self.description,
-            &crate::tr!("Windows 系统安装、备份和维护工具。"),
-        );
+        set_text(self.version, &crate::build_info::display_version());
+        set_text(self.description, &crate::build_info::description());
         set_text(self.language_label, &crate::tr!("界面语言:"));
         set_text(self.refresh_languages, &crate::tr!("刷新"));
         set_text(self.easy_mode, &crate::tr!("启用小白模式"));

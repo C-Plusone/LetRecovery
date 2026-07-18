@@ -9,6 +9,9 @@ authors = ["NORMAL-EX"]
 description = "Windows系统一键重装工具"
 
 [features]
+# Explicit opt-in for distributable test builds. Production builds omit this feature, which
+# keeps `build_info::DEV` false and removes all test-build labels from the UI.
+dev-build = []
 # Test harnesses must not trigger a UAC prompt. build.rs rejects this feature
 # for release builds so production binaries always require elevation.
 non-elevated-tests = []

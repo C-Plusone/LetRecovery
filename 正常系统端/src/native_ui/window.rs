@@ -2440,15 +2440,18 @@ impl NativeWindow {
         hardware.apply_theme(self.palette);
         self.hardware_page = Some(hardware);
 
+        let about_product_name = crate::build_info::product_name();
+        let about_version = crate::build_info::display_version();
+        let about_description = crate::build_info::description();
         let about = AboutPage::create(
             hwnd,
             self.font,
             self.font_bold,
             &AboutLabels {
-                product_name: "LetRecovery",
+                product_name: &about_product_name,
                 version_label: &crate::tr!("版本:"),
-                version: env!("BUILD_VERSION"),
-                description: &crate::tr!("Windows 系统安装、备份和维护工具。"),
+                version: &about_version,
+                description: &about_description,
                 link_labels: [
                     &crate::tr!("项目主页"),
                     &crate::tr!("问题反馈"),
@@ -3627,8 +3630,8 @@ impl NativeWindow {
                 crate::tr!("复制信息"),
             ),
             Page::About => (
-                crate::tr!("关于 LetRecovery"),
-                env!("BUILD_VERSION").to_owned(),
+                crate::build_info::about_title(),
+                crate::build_info::display_version(),
                 crate::tr!("关闭"),
             ),
         };
@@ -9221,7 +9224,7 @@ impl NativeWindow {
         // native HWND. Keep those intermediate mixed-language frames hidden and publish one
         // complete non-client/client/descendant transaction after layout has stabilised.
         let redraw = redraw::suspend(hwnd);
-        set_text(hwnd, &crate::tr!("LetRecovery - Windows系统一键重装工具"));
+        set_text(hwnd, &crate::build_info::window_title());
         if let Some(handles) = &self.handles {
             for (control, label) in handles.nav.into_iter().zip([
                 crate::tr!("系统安装"),
@@ -9662,7 +9665,8 @@ pub fn run(config: Arc<PreloadedConfig>) -> windows::core::Result<()> {
             return Err(windows::core::Error::from_win32());
         }
         let mut state = Box::new(NativeWindow::new(config));
-        let title = wide(crate::tr!("LetRecovery - Windows系统一键重装工具"));
+        let title_text = crate::build_info::window_title();
+        let title = wide(&title_text);
         let initial_dpi = GetDpiForSystem().max(96) as i32;
         let screen_width = GetSystemMetrics(SM_CXSCREEN);
         let screen_height = GetSystemMetrics(SM_CYSCREEN);
