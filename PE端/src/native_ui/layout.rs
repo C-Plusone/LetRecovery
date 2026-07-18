@@ -24,7 +24,6 @@ pub(crate) struct ProgressGeometry {
     pub row_height: i32,
     pub title: PixelRect,
     pub subtitle: Option<PixelRect>,
-    pub step_caption: Option<PixelRect>,
     pub step_percent: Option<PixelRect>,
     pub step_bar: Option<PixelRect>,
     pub overall_caption: PixelRect,
@@ -52,7 +51,7 @@ pub(crate) fn progress_geometry(
     let top = scale(16).min(24);
     let gap = scale(6).min(12);
     let line_height = scale(22);
-    let row_height = scale(26);
+    let row_height = scale(24);
     let title_height = scale(40);
     let subtitle_height = scale(22);
     let bar_height = scale(10);
@@ -72,19 +71,15 @@ pub(crate) fn progress_geometry(
 
     let progress_group_height = line_height + gap + bar_height;
     let status_minimum = minimum_status_height(dpi).min((command_top - top).max(1));
-    let full_step_height = if has_step {
-        progress_group_height + gap
-    } else {
-        0
-    };
+    let full_step_height = if has_step { line_height + gap } else { 0 };
     let full_mandatory_height =
         title_height + gap + full_step_height + progress_group_height + gap + status_minimum;
     let content_budget = (command_top - top - gap).max(1);
     let compact_step = has_step && content_budget < full_mandatory_height;
     let flow_gap = if compact_step { scale(4).min(8) } else { gap };
     // The running page deliberately omits the redundant "do not close" subtitle. Keeping this
-    // geometry slot disabled also moves the current-step caption closer to the title as a single
-    // compact hierarchy instead of leaving an unexplained blank row.
+    // geometry slot disabled also keeps the live step bar close to the title instead of leaving an
+    // unexplained blank row.
     let show_subtitle = false;
 
     let mut title = PixelRect {
@@ -129,33 +124,46 @@ pub(crate) fn progress_geometry(
         (caption, percent, bar)
     };
 
-    let (mut step_caption, mut step_percent, mut step_bar) = if has_step && compact_step {
-        let caption = PixelRect {
+    let step_group = |y: i32| {
+        let bar = PixelRect {
             x: pad,
-            y: cursor,
-            width: content_width,
+            y: y + (line_height - bar_height).max(0) / 2,
+            width: (content_width - percent_width - flow_gap).max(1),
+            height: bar_height,
+        };
+        let percent = PixelRect {
+            x: bar.right() + flow_gap,
+            y,
+            width: percent_width,
             height: line_height,
         };
-        cursor = caption.bottom() + flow_gap;
-        (Some(caption), None, None)
+        (percent, bar)
+    };
+
+    let (mut step_percent, mut step_bar) = if has_step && compact_step {
+        (None, None)
     } else if has_step {
-        let (caption, percent, bar) = group(cursor);
-        cursor = bar.bottom() + flow_gap;
-        (Some(caption), Some(percent), Some(bar))
+        let (percent, bar) = step_group(cursor);
+        cursor += line_height + flow_gap;
+        (Some(percent), Some(bar))
     } else {
-        (None, None, None)
+        (None, None)
     };
     let (mut overall_caption, mut overall_percent, mut overall_bar) = group(cursor);
     cursor = overall_bar.bottom();
 
-    let status_bottom = (command_top - flow_gap).max(cursor);
+    let status_bottom = if reserve_command_bar {
+        (command_top - flow_gap).max(cursor)
+    } else {
+        command_top.max(cursor)
+    };
     let status = PixelRect {
         x: pad,
         y: status_bottom,
         width: content_width,
         height: 0,
     };
-    let row_gap = if row_count == 0 { 0 } else { scale(18) };
+    let row_gap = if row_count == 0 { 0 } else { scale(14) };
     let rows_top = (cursor + row_gap).min(status_bottom);
     let single_column_height = row_height.saturating_mul(row_count as i32);
     let two_column_height = row_height.saturating_mul(row_count.div_ceil(2) as i32);
@@ -169,7 +177,7 @@ pub(crate) fn progress_geometry(
     };
     let natural_bottom = rows_top + rows_height;
     let content_height = (natural_bottom - top).max(1);
-    // Keep the heading and current-step summary slightly above the mathematical centre while the
+    // Keep the heading and progress summary slightly above the mathematical centre while the
     // complete block still consumes otherwise unused vertical space.
     let centered_top = ((status_bottom - content_height) / 2 - scale(32)).max(top);
     let vertical_shift = if all_rows_fit {
@@ -180,9 +188,6 @@ pub(crate) fn progress_geometry(
     let shift = |rect: &mut PixelRect| rect.y += vertical_shift;
     shift(&mut title);
     if let Some(rect) = &mut subtitle {
-        shift(rect);
-    }
-    if let Some(rect) = &mut step_caption {
         shift(rect);
     }
     if let Some(rect) = &mut step_percent {
@@ -206,7 +211,6 @@ pub(crate) fn progress_geometry(
         row_height,
         title,
         subtitle,
-        step_caption,
         step_percent,
         step_bar,
         overall_caption,
@@ -397,10 +401,6 @@ mod tests {
                     assert!(layout.status.bottom() <= layout.command.y);
                     assert_eq!(layout.status.height, 0);
                     assert!(layout.rows.bottom() <= layout.command.y);
-                    if let Some(step) = layout.step_caption {
-                        assert!(step.height > 0);
-                        assert!(step.bottom() <= layout.overall_caption.y);
-                    }
                     assert_eq!(layout.step_bar.is_some(), layout.step_percent.is_some());
                     if let Some(subtitle) = layout.subtitle {
                         assert!(subtitle.bottom() <= layout.overall_caption.y);
@@ -415,12 +415,21 @@ mod tests {
         let dpi = 144;
         let layout = progress_geometry(1180, 846, dpi, true, 11, false);
 
-        assert_eq!(layout.rows.height, scaled(26, dpi) * 11);
+        assert_eq!(layout.rows.height, scaled(24, dpi) * 11);
         assert!(layout.title.y > scaled(16, dpi).min(24));
         assert_eq!(layout.command.y, 846);
         assert_eq!(layout.command.height, 0);
         assert!(layout.title.y < 108);
         assert!(layout.rows.bottom() < 846);
+    }
+
+    #[test]
+    fn compact_default_progress_client_keeps_install_steps_in_one_column() {
+        let dpi = 144;
+        let layout = progress_geometry(700, 606, dpi, true, 10, false);
+
+        assert_eq!(layout.rows.height, scaled(24, dpi) * 10);
+        assert!(layout.rows.bottom() <= 606);
     }
 
     #[test]

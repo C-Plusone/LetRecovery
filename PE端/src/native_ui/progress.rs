@@ -59,9 +59,9 @@ const ID_CLOSE: u16 = 2001;
 const ID_BACK: u16 = 2002;
 const ID_DETAILS: u16 = 2003;
 const MIN_WIDTH: i32 = 440;
-const MIN_HEIGHT: i32 = 480;
+const MIN_HEIGHT: i32 = 430;
 const PREFERRED_WIDTH: i32 = 480;
-const PREFERRED_HEIGHT: i32 = 500;
+const PREFERRED_HEIGHT: i32 = 440;
 const SS_CENTER_STYLE: u32 = 0x0000_0001;
 const SS_CENTERIMAGE_STYLE: u32 = 0x0000_0200;
 
@@ -231,7 +231,6 @@ struct NativeProgressWindow {
     title_font: HFONT,
     title: HWND,
     subtitle: HWND,
-    step_caption: HWND,
     step_percent: HWND,
     overall_caption: HWND,
     overall_percent: HWND,
@@ -290,7 +289,6 @@ impl NativeProgressWindow {
             title_font: create_ui_font_for_role(dpi, 16, UiFontRole::Heading),
             title: HWND::default(),
             subtitle: HWND::default(),
-            step_caption: HWND::default(),
             step_percent: HWND::default(),
             overall_caption: HWND::default(),
             overall_percent: HWND::default(),
@@ -313,7 +311,6 @@ impl NativeProgressWindow {
         self.title =
             create_centered_static(hwnd, 2101, &progress_title(self.presentation.workflow))?;
         self.subtitle = HWND::default();
-        self.step_caption = create_centered_static(hwnd, 2103, &crate::tr!("当前步骤"))?;
         self.step_percent = create_static(hwnd, 2104, "0%")?;
         self.overall_caption = create_static(hwnd, 2105, &crate::tr!("总体进度"))?;
         self.overall_percent = create_static(hwnd, 2106, "0%")?;
@@ -371,8 +368,6 @@ impl NativeProgressWindow {
     }
 
     unsafe fn render_full_presentation(&self, hwnd: HWND) {
-        let step = current_step_text(self.presentation.current_step);
-        set_text(self.step_caption, &step);
         set_text(
             self.step_percent,
             &format!("{}%", self.presentation.step_progress),
@@ -406,7 +401,6 @@ impl NativeProgressWindow {
         }
         for control in [
             self.subtitle,
-            self.step_caption,
             self.step_percent,
             self.overall_caption,
             self.overall_percent,
@@ -468,11 +462,6 @@ impl NativeProgressWindow {
     }
 
     unsafe fn apply_presentation(&mut self, hwnd: HWND, next: ProgressPresentation) {
-        if self.presentation.current_step != next.current_step {
-            let text = current_step_text(next.current_step);
-            set_text(self.step_caption, &text);
-            self.layout(hwnd);
-        }
         if self.presentation.step_progress != next.step_progress {
             set_text(self.step_percent, &format!("{}%", next.step_progress));
             let _ = InvalidateRect(hwnd, Some(&self.step_bar), false);
@@ -557,7 +546,6 @@ impl NativeProgressWindow {
         for control in [
             self.title,
             self.subtitle,
-            self.step_caption,
             self.step_percent,
             self.overall_caption,
             self.overall_percent,
@@ -654,13 +642,6 @@ impl NativeProgressWindow {
             let _ = ShowWindow(self.subtitle, SW_SHOW);
         } else {
             let _ = ShowWindow(self.subtitle, SW_HIDE);
-        }
-        if let Some(caption) = layout.step_caption {
-            move_pixel_control(self.step_caption, caption);
-            let _ = ShowWindow(self.step_caption, SW_SHOW);
-        } else {
-            move_control(self.step_caption, 0, 0, 0, 0);
-            let _ = ShowWindow(self.step_caption, SW_HIDE);
         }
         if let (Some(percent), Some(bar)) = (layout.step_percent, layout.step_bar) {
             move_pixel_control(self.step_percent, percent);
@@ -940,13 +921,6 @@ fn progress_title(workflow: WorkflowKind) -> String {
         WorkflowKind::Expand => crate::tr!("LetRecovery PE 扩容助手"),
         WorkflowKind::Missing => crate::tr!("LetRecovery PE"),
     }
-}
-
-fn current_step_text(step: Option<&str>) -> String {
-    let name = step
-        .map(|step| crate::tr!(step))
-        .unwrap_or_else(|| crate::tr!("正在准备操作..."));
-    format!("{}：[{}]", crate::tr!("当前步骤"), name)
 }
 
 fn terminal_status_text(terminal: ProgressTerminal) -> String {
@@ -1306,8 +1280,8 @@ mod tests {
 
     #[test]
     fn default_progress_window_is_compact_and_row_text_is_vertically_centered() {
-        assert_eq!((PREFERRED_WIDTH, PREFERRED_HEIGHT), (480, 500));
-        assert_eq!((MIN_WIDTH, MIN_HEIGHT), (440, 480));
+        assert_eq!((PREFERRED_WIDTH, PREFERRED_HEIGHT), (480, 440));
+        assert_eq!((MIN_WIDTH, MIN_HEIGHT), (440, 430));
         assert_eq!(SS_CENTERIMAGE_STYLE, 0x0000_0200);
     }
 
