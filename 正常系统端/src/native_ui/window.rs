@@ -1317,6 +1317,7 @@ struct NativeWindow {
     partition_refresh_generation: u64,
     partition_refresh_in_flight: bool,
     partition_refresh_requested: bool,
+    partition_refresh_error: Option<String>,
     partition_list_replacing: bool,
     install_selection_update_pending: bool,
     image_volumes: Vec<crate::core::dism::ImageInfo>,
@@ -1491,6 +1492,7 @@ impl NativeWindow {
             partition_refresh_generation: 0,
             partition_refresh_in_flight: false,
             partition_refresh_requested: false,
+            partition_refresh_error: None,
             partition_list_replacing: false,
             install_selection_update_pending: false,
             image_volumes: Vec::new(),
@@ -3974,11 +3976,19 @@ impl NativeWindow {
         // BN_CLICKED. Synchronize the visible controls first so the enabled state and the click
         // path both use the same current preferences even before the user touches a ComboBox.
         self.sync_install_preferences_from_controls();
-        let enabled = self.install_intent().is_ok();
+        let validation = self.install_intent();
+        let enabled = validation.is_ok();
         let Some(h) = &self.handles else { return };
-        if IsWindowEnabled(h.primary).as_bool() != enabled {
+        let was_enabled = IsWindowEnabled(h.primary).as_bool();
+        if was_enabled != enabled {
             let _ = EnableWindow(h.primary, enabled);
             let _ = InvalidateRect(h.primary, None, false);
+            if was_enabled && !enabled {
+                if let Err(error) = validation {
+                    log::warn!("安装按钮因校验状态变化被禁用: {error:?}");
+                    set_text(h.status, &error.to_string());
+                }
+            }
         }
     }
 
@@ -4541,16 +4551,27 @@ impl NativeWindow {
         if let Some(page) = &self.backup_page {
             page.replace_partitions(&backup_rows, selected_backup_source);
         }
-        self.update_install_primary_state();
         self.update_backup_primary_state();
         true
     }
 
     unsafe fn refresh_partitions(&mut self) -> bool {
         match crate::core::disk::DiskManager::get_partitions() {
-            Ok(partitions) => self.apply_partition_inventory(partitions),
+            Ok(partitions) => {
+                self.partition_refresh_error = None;
+                self.apply_partition_inventory(partitions)
+            }
             Err(error) => {
                 log::warn!("原生 UI 刷新分区失败: {error}");
+                self.partition_refresh_error = Some(error.to_string());
+                if self.page == Page::Install {
+                    if let Some(handles) = self.handles {
+                        set_text(
+                            handles.status,
+                            &crate::tr!("刷新分区信息失败，请手动刷新后重试。"),
+                        );
+                    }
+                }
                 false
             }
         }
@@ -4558,7 +4579,21 @@ impl NativeWindow {
 
     unsafe fn schedule_partition_refresh(&mut self, hwnd: HWND) {
         self.partition_refresh_requested = true;
+        self.partition_refresh_error = None;
         let _ = KillTimer(hwnd, PARTITION_REFRESH_TIMER_ID);
+        if self.pca_target_detection_pending {
+            // The read-only PCA probe temporarily assigns and removes an ESP drive letter. Those
+            // operations generate device-change broadcasts while DiskPart still owns the probe
+            // transaction. Defer the inventory scan until the probe has posted its terminal
+            // result so a transient snapshot cannot replace a previously stable target.
+            return;
+        }
+        if self.page == Page::Install {
+            if let Some(handles) = self.handles {
+                set_text(handles.status, &crate::tr!("正在刷新分区信息，请稍候。"));
+            }
+            self.update_install_primary_state();
+        }
         let _ = SetTimer(
             hwnd,
             PARTITION_REFRESH_TIMER_ID,
@@ -4569,7 +4604,10 @@ impl NativeWindow {
 
     unsafe fn start_scheduled_partition_refresh(&mut self, hwnd: HWND) {
         let _ = KillTimer(hwnd, PARTITION_REFRESH_TIMER_ID);
-        if self.partition_refresh_in_flight || !self.partition_refresh_requested {
+        if self.pca_target_detection_pending
+            || self.partition_refresh_in_flight
+            || !self.partition_refresh_requested
+        {
             return;
         }
         self.partition_refresh_requested = false;
@@ -4603,15 +4641,30 @@ impl NativeWindow {
         self.partition_refresh_in_flight = false;
         match message.result {
             Ok(partitions) => {
+                self.partition_refresh_error = None;
                 if self.apply_partition_inventory(partitions) {
                     self.request_pca_target_detection(hwnd);
                     self.update_pca_detection_status();
                 }
             }
-            Err(error) => log::warn!("设备变更后的异步分区刷新失败: {error}"),
+            Err(error) => {
+                log::warn!("设备变更后的异步分区刷新失败: {error}");
+                self.partition_refresh_error = Some(error);
+                if self.page == Page::Install {
+                    if let Some(handles) = self.handles {
+                        set_text(
+                            handles.status,
+                            &crate::tr!("刷新分区信息失败，请手动刷新后重试。"),
+                        );
+                    }
+                }
+            }
         }
         if self.partition_refresh_requested {
             self.schedule_partition_refresh(hwnd);
+        }
+        if self.page == Page::Install {
+            self.update_install_primary_state();
         }
     }
 
@@ -7977,6 +8030,9 @@ impl NativeWindow {
                 .filter(|index| *index < pe.len()),
             custom_unattend_path: self.custom_unattend_path.clone(),
             custom_unattend_error: self.custom_unattend_error.clone(),
+            partition_refresh_pending: self.partition_refresh_requested
+                || self.partition_refresh_in_flight,
+            partition_refresh_error: self.partition_refresh_error.clone(),
             pca_detection_pending: self.pca_detection_pending || self.pca_target_detection_pending,
             pca_selection_error: self.pca_selection_error(),
             advanced_options_enabled: self.app_config.enable_advanced_options,
@@ -8906,6 +8962,8 @@ impl NativeWindow {
             selected_pe: (!pe.is_empty()).then_some(0),
             custom_unattend_path: String::new(),
             custom_unattend_error: None,
+            partition_refresh_pending: false,
+            partition_refresh_error: None,
             pca_detection_pending: false,
             pca_selection_error: None,
             advanced_options_enabled: false,
@@ -9889,7 +9947,11 @@ unsafe extern "system" fn window_proc(
                     state.pca_target_detection_pending = false;
                     state.pca_target_detection_error = message.result.err();
                     state.update_pca_detection_status();
-                    state.update_install_primary_state();
+                    if state.partition_refresh_requested {
+                        state.schedule_partition_refresh(hwnd);
+                    } else {
+                        state.update_install_primary_state();
+                    }
                 }
             }
             LRESULT(0)
@@ -10294,9 +10356,11 @@ unsafe extern "system" fn window_proc(
                         state.update_backup_primary_state();
                     }
                     ID_REFRESH => {
-                        let _ = state.refresh_partitions();
-                        state.request_pca_target_detection(hwnd);
-                        state.update_pca_detection_status();
+                        if state.refresh_partitions() {
+                            state.request_pca_target_detection(hwnd);
+                            state.update_pca_detection_status();
+                        }
+                        state.update_install_primary_state();
                     }
                     ID_IMAGE_EDIT => state.update_install_primary_state(),
                     ID_IMAGE_VOLUME if notification == CBN_SELCHANGE as u16 => {

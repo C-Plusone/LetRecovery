@@ -1937,6 +1937,8 @@
     "请选择用于安装的 PE 环境。": "Select the PE environment to use for installation.",
     "自定义无人值守文件无效。": "The custom unattended setup file is invalid.",
     "正在检测 PCA 兼容性，请稍候。": "PCA compatibility is being checked. Please wait.",
+    "正在刷新分区信息，请稍候。": "Refreshing partition information. Please wait.",
+    "刷新分区信息失败，请手动刷新后重试。": "Failed to refresh partition information. Refresh manually and try again.",
     "所选 PCA 启动签名与系统镜像不兼容。": "The selected PCA boot signature is incompatible with the system image.",
     "XP 文本模式安装需要 Legacy/MBR 目标。": "XP text-mode setup requires a Legacy/MBR target.",
     "XP 文本模式不能在桌面环境覆盖当前系统分区。": "XP text-mode setup cannot overwrite the current system partition from the desktop environment.",

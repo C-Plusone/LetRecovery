@@ -48,6 +48,10 @@ pub struct NativeInstallState {
     pub selected_pe: Option<usize>,
     pub custom_unattend_path: String,
     pub custom_unattend_error: Option<String>,
+    /// True while a device-change inventory refresh is queued or running. The cached target
+    /// identity must not be dispatched until the refresh has accepted a current snapshot.
+    pub partition_refresh_pending: bool,
+    pub partition_refresh_error: Option<String>,
     pub pca_detection_pending: bool,
     pub pca_selection_error: Option<String>,
     pub advanced_options_enabled: bool,
@@ -65,6 +69,8 @@ pub enum InstallValidationError {
     PeUnavailable,
     MissingPeSelection,
     InvalidCustomUnattend,
+    PartitionRefreshPending,
+    PartitionRefreshFailed,
     PcaDetectionPending,
     InvalidPcaSelection,
     XpI386RequiresLegacyMbr,
@@ -84,6 +90,8 @@ impl std::fmt::Display for InstallValidationError {
             Self::PeUnavailable => crate::tr!("安装到当前系统分区需要可用的 PE 环境。"),
             Self::MissingPeSelection => crate::tr!("请选择用于安装的 PE 环境。"),
             Self::InvalidCustomUnattend => crate::tr!("自定义无人值守文件无效。"),
+            Self::PartitionRefreshPending => crate::tr!("正在刷新分区信息，请稍候。"),
+            Self::PartitionRefreshFailed => crate::tr!("刷新分区信息失败，请手动刷新后重试。"),
             Self::PcaDetectionPending => crate::tr!("正在检测 PCA 兼容性，请稍候。"),
             Self::InvalidPcaSelection => crate::tr!("所选 PCA 启动签名与系统镜像不兼容。"),
             Self::XpI386RequiresLegacyMbr => {
@@ -171,6 +179,12 @@ impl NativeInstallState {
         }
         if self.custom_unattend_error.is_some() {
             return Err(InstallValidationError::InvalidCustomUnattend);
+        }
+        if self.partition_refresh_error.is_some() {
+            return Err(InstallValidationError::PartitionRefreshFailed);
+        }
+        if self.partition_refresh_pending {
+            return Err(InstallValidationError::PartitionRefreshPending);
         }
         // Match the legacy UI gate: PCA selection is meaningful only when the
         // selected image supports it, boot repair is enabled and the resolved
@@ -402,6 +416,8 @@ mod tests {
             selected_pe: None,
             custom_unattend_path: String::new(),
             custom_unattend_error: None,
+            partition_refresh_pending: false,
+            partition_refresh_error: None,
             pca_detection_pending: false,
             pca_selection_error: None,
             advanced_options_enabled: false,
@@ -503,6 +519,32 @@ mod tests {
             state.start_intent().unwrap_err(),
             InstallValidationError::UnstableTargetIdentity
         );
+    }
+
+    #[test]
+    fn queued_or_running_partition_refresh_blocks_stale_target_dispatch() {
+        let mut state = base_state();
+        state.partition_refresh_pending = true;
+        assert_eq!(
+            state.start_intent().unwrap_err(),
+            InstallValidationError::PartitionRefreshPending
+        );
+
+        state.partition_refresh_pending = false;
+        assert!(state.start_intent().is_ok());
+    }
+
+    #[test]
+    fn failed_partition_refresh_remains_fail_closed_until_a_successful_retry() {
+        let mut state = base_state();
+        state.partition_refresh_error = Some("inventory unavailable".to_string());
+        assert_eq!(
+            state.start_intent().unwrap_err(),
+            InstallValidationError::PartitionRefreshFailed
+        );
+
+        state.partition_refresh_error = None;
+        assert!(state.start_intent().is_ok());
     }
 
     #[test]
