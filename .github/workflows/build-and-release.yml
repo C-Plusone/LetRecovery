@@ -535,6 +535,82 @@ jobs:
           ( cd pkg && 7z a -t7z -mx=9 -m0=lzma2 -ms=on ../LetRecovery.7z ./* >/dev/null )
           ls -la LetRecovery.7z
 
+      - name: Install Inno Setup 6.7.1
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.7.1 --yes --no-progress
+          $exitCode = $LASTEXITCODE
+          if (@(0, 1605, 1614, 1641, 3010) -notcontains $exitCode) {
+            throw "Chocolatey failed to install Inno Setup 6.7.1 (exit code $exitCode)"
+          }
+
+          $compiler = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+            (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+          ) | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and
+            (Test-Path -LiteralPath $_ -PathType Leaf)
+          } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($compiler)) {
+            throw "Inno Setup 6.7.1 was installed but ISCC.exe was not found"
+          }
+
+          $compiler = (Resolve-Path -LiteralPath $compiler).Path
+          "INNO_COMPILER=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Inno Setup compiler: $compiler"
+
+      - name: Build offline installer EXE
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "installer\output"
+          if (Test-Path -LiteralPath $output) {
+            Remove-Item -LiteralPath $output -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $output | Out-Null
+
+          & .\installer\build-installer.ps1 `
+            -SourceDirectory (Resolve-Path .\pkg).Path `
+            -OutputDirectory $output `
+            -InnoCompiler $env:INNO_COMPILER
+
+          $installer = Join-Path $output "LetRecovery-Setup-x64.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Installer build did not produce LetRecovery-Setup-x64.exe"
+          }
+
+      - name: Verify the two Release assets
+        shell: pwsh
+        run: |
+          $archive = (Resolve-Path .\LetRecovery.7z).Path
+          $installerDirectory = (Resolve-Path .\installer\output).Path
+          $installer = Join-Path $installerDirectory "LetRecovery-Setup-x64.exe"
+
+          & 7z t $archive
+          if ($LASTEXITCODE -ne 0) {
+            throw "LetRecovery.7z integrity test failed with exit code $LASTEXITCODE"
+          }
+
+          $installerFiles = @(Get-ChildItem -LiteralPath $installerDirectory -File)
+          if ($installerFiles.Count -ne 1 -or $installerFiles[0].Name -ne "LetRecovery-Setup-x64.exe") {
+            $names = $installerFiles.Name -join ", "
+            throw "Installer output must contain exactly LetRecovery-Setup-x64.exe; found: $names"
+          }
+
+          $assets = @(
+            Get-Item -LiteralPath $archive
+            Get-Item -LiteralPath $installer
+          )
+          foreach ($asset in $assets) {
+            if ($asset.Length -le 0) {
+              throw "Release asset is empty: $($asset.FullName)"
+            }
+            $hash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash
+            Write-Host "$($asset.Name): $($asset.Length) bytes, SHA-256 $hash"
+            "- ``$($asset.Name)`` — $($asset.Length) bytes — SHA-256 ``$hash``" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
       - name: Determine tag
         id: tag
         shell: pwsh
@@ -566,10 +642,12 @@ jobs:
             printf '%s\n' "Automated build from branch ${BR} (commit ${SHA})."
           } > release_notes.md
           gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
-          gh release create "$TAG" LetRecovery.7z \
+          gh release create "$TAG" \
+            LetRecovery.7z \
+            installer/output/LetRecovery-Setup-x64.exe \
             --repo "${{ github.repository }}" \
             --target "$SHA" \
             --title "$TAG" \
             --notes-file release_notes.md \
             $PRE
-          echo "Released $TAG (prerelease: ${PRE:-no})"
+          echo "Released $TAG with LetRecovery.7z and LetRecovery-Setup-x64.exe (prerelease: ${PRE:-no})"
