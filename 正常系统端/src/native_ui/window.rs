@@ -580,6 +580,27 @@ struct CommandBarLayout {
     left_edge: i32,
 }
 
+const fn command_bar_visibility(
+    page: Page,
+    easy_mode_enabled: bool,
+    advanced_visible: bool,
+    progress_visible: bool,
+) -> [bool; 3] {
+    if progress_visible {
+        [false, false, false]
+    } else if advanced_visible {
+        [true, false, false]
+    } else {
+        let easy_visible = matches!(page, Page::Install) && easy_mode_enabled;
+        let install_visible = matches!(page, Page::Install) && !easy_visible;
+        [
+            install_visible || matches!(page, Page::Hardware),
+            install_visible,
+            !matches!(page, Page::Download | Page::Tools) && !easy_visible,
+        ]
+    }
+}
+
 fn command_bar_layout(
     content_right: i32,
     button_gap: i32,
@@ -646,7 +667,7 @@ impl InstallVolumeLayoutTransition {
 mod layout_tests {
     use super::{
         bitlocker_gate_completion, centered_command_button_x, command_bar_layout,
-        command_button_role, confirmed_tool_backend_request,
+        command_bar_visibility, command_button_role, confirmed_tool_backend_request,
         device_change_requests_partition_refresh, download_failure_message,
         initial_mutating_tool_state, install_partition_heading_y,
         list_view_selection_state_changed, minimum_window_size, page_switch_requires_full_layout,
@@ -739,6 +760,26 @@ mod layout_tests {
         let backup = command_bar_layout(1_000, 8, 120, [false, false, true]);
         assert_eq!(backup.x, [None, None, Some(880)]);
         assert_eq!(backup.left_edge, 880);
+    }
+
+    #[test]
+    fn command_visibility_matches_every_install_shell_state() {
+        assert_eq!(
+            command_bar_visibility(Page::Install, false, false, false),
+            [true, true, true]
+        );
+        assert_eq!(
+            command_bar_visibility(Page::Install, true, false, false),
+            [false, false, false]
+        );
+        assert_eq!(
+            command_bar_visibility(Page::Install, false, true, false),
+            [true, false, false]
+        );
+        assert_eq!(
+            command_bar_visibility(Page::Install, false, false, true),
+            [false, false, false]
+        );
     }
 
     #[test]
@@ -2119,6 +2160,11 @@ impl NativeWindow {
         }
         self.update_pca_combo_labels();
         self.create_secondary_pages(hwnd)?;
+        // Child HWNDs are created visible by default, while easy mode intentionally hides the
+        // ordinary Install page and its shared command bar. Reconcile the initial route before
+        // the top-level window is ever shown; merely laying out an invisible command at the right
+        // edge leaves a still-visible HWND clipped to a narrow rectangle on small displays.
+        self.select_page_impl(hwnd, Page::Install, false);
         self.request_pca_firmware_detection(hwnd);
         self.update_system_status();
         self.apply_native_dark_theme(hwnd);
@@ -3291,22 +3337,12 @@ impl NativeWindow {
         let preferred_button_width = self.scale(if compact_chinese { 96 } else { 136 });
         let command_button_width =
             preferred_button_width.min(((content_width - button_gap * 2) / 3).max(0));
-        let easy_visible = self.page == Page::Install && self.app_config.easy_mode_enabled;
-        let install_visible = self.page == Page::Install
-            && !easy_visible
-            && !self.advanced_visible
-            && !self.progress_visible;
-        let command_visibility = if self.progress_visible {
-            [false, false, false]
-        } else if self.advanced_visible {
-            [true, false, false]
-        } else {
-            [
-                install_visible || self.page == Page::Hardware,
-                install_visible,
-                !matches!(self.page, Page::Download | Page::Tools) && !easy_visible,
-            ]
-        };
+        let command_visibility = command_bar_visibility(
+            self.page,
+            self.app_config.easy_mode_enabled,
+            self.advanced_visible,
+            self.progress_visible,
+        );
         // Pack the controls that are actually visible. In particular, Hardware has Save and
         // Copy but no Refresh; reserving the hidden middle slot left an obvious empty gap after a
         // page switch. Keeping this calculation independent of the previous page also makes a
@@ -3428,22 +3464,12 @@ impl NativeWindow {
         let preferred_button_width = self.scale(if compact_chinese { 96 } else { 136 });
         let command_button_width =
             preferred_button_width.min(((content_width - button_gap * 2) / 3).max(0));
-        let easy_visible = self.page == Page::Install && self.app_config.easy_mode_enabled;
-        let install_visible = self.page == Page::Install
-            && !easy_visible
-            && !self.advanced_visible
-            && !self.progress_visible;
-        let command_visibility = if self.progress_visible {
-            [false, false, false]
-        } else if self.advanced_visible {
-            [true, false, false]
-        } else {
-            [
-                install_visible || self.page == Page::Hardware,
-                install_visible,
-                !matches!(self.page, Page::Download | Page::Tools) && !easy_visible,
-            ]
-        };
+        let command_visibility = command_bar_visibility(
+            self.page,
+            self.app_config.easy_mode_enabled,
+            self.advanced_visible,
+            self.progress_visible,
+        );
         let command_layout = command_bar_layout(
             content_right,
             button_gap,
