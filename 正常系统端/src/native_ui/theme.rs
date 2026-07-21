@@ -1,19 +1,16 @@
 use windows::core::{w, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{
-    BOOL, COLORREF, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
-};
+use windows::Win32::Foundation::{COLORREF, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_DONOTROUND, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC,
-    CreateDIBSection, CreatePen, CreateRectRgn, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint,
-    FillRect, GdiFlush, GetTextMetricsW, GetWindowDC, InvalidateRect, RedrawWindow, ReleaseDC,
-    RoundRect, ScreenToClient, SelectObject, SetBkMode, SetDIBitsToDevice, SetStretchBltMode,
-    SetTextColor, SetWindowRgn, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-    DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
-    DT_WORDBREAK, HALFTONE, HBRUSH, HDC, PAINTSTRUCT, PEN_STYLE, RDW_ERASE, RDW_FRAME,
+    BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreatePen,
+    CreateRectRgn, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetTextMetricsW,
+    GetWindowDC, InvalidateRect, RedrawWindow, ReleaseDC, RoundRect, ScreenToClient, SelectObject,
+    SetBkMode, SetDIBitsToDevice, SetStretchBltMode, SetTextColor, SetWindowRgn, StretchDIBits,
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_NOPREFIX,
+    DT_SINGLELINE, DT_VCENTER, HALFTONE, HBRUSH, HDC, PAINTSTRUCT, PEN_STYLE, RDW_ERASE, RDW_FRAME,
     RDW_INVALIDATE, RDW_NOERASE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::UI::Controls::{
@@ -25,30 +22,27 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetFocus, IsWindowEnabled, TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
 };
-use windows::Win32::UI::Shell::{
-    DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass, SUBCLASSPROC,
-};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 #[cfg(test)]
 use windows::Win32::UI::WindowsAndMessaging::WS_VSCROLL;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetClassNameW, GetClientRect, GetCursorPos, GetParent, GetPropW,
-    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HideCaret,
-    PostMessageW, RemovePropW, SendMessageW, SetPropW, SetWindowLongPtrW, SetWindowPos, ShowCaret,
-    GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    WM_CANCELMODE, WM_CAPTURECHANGED, WM_ENABLE, WM_ERASEBKGND, WM_GETFONT, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCPAINT, WM_NOTIFY,
-    WM_PAINT, WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SIZE, WM_THEMECHANGED, WS_BORDER,
-    WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_EX_LAYERED,
+    GetClassNameW, GetClientRect, GetCursorPos, GetParent, GetPropW, GetWindowLongPtrW,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HideCaret, PostMessageW, RemovePropW,
+    SendMessageW, SetPropW, SetWindowLongPtrW, SetWindowPos, ShowCaret, GWL_EXSTYLE, GWL_STYLE,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_CANCELMODE,
+    WM_CAPTURECHANGED, WM_ENABLE, WM_ERASEBKGND, WM_GETFONT, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCPAINT, WM_NOTIFY, WM_PAINT,
+    WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SIZE, WM_THEMECHANGED, WS_BORDER, WS_CLIPCHILDREN,
+    WS_EX_CLIENTEDGE, WS_EX_LAYERED,
 };
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 
 use super::controls::{
-    alpha_blend_premultiplied_bgra, button_visual, draw_alpha_composited_text,
-    draw_antialiased_control_frame, draw_opaque_surface_text, draw_progress,
-    fill_alpha_opaque_rect, fill_round_rect_antialiased, rounded_control_frame_geometry,
-    single_line_edit_frame, single_line_edit_frame_owner, ButtonRole, ControlState, InnoMetrics,
-    ProgressRole,
+    alpha_blend_premultiplied_bgra, button_visual, draw_antialiased_control_frame,
+    draw_native_text, draw_opaque_surface_text, draw_progress, fill_round_rect_antialiased,
+    rounded_control_frame_geometry, single_line_edit_frame, single_line_edit_frame_owner,
+    ButtonRole, ControlState, InnoMetrics, ProgressRole,
 };
 
 const fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
@@ -78,35 +72,6 @@ pub struct Palette {
     pub highlight_border: COLORREF,
     /// Inno Modern Windows 11 task progress and checked-state accent.
     pub progress: COLORREF,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MaterialSurfaceState {
-    Normal,
-    Hot,
-    Pressed,
-    Disabled,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MaterialSurfaceVisual {
-    pub fill: COLORREF,
-    pub border: COLORREF,
-    pub fill_alpha: u8,
-    pub border_alpha: u8,
-}
-
-const fn composite_channel(source: u32, alpha: u32, background: u32) -> u32 {
-    (source * alpha + background * (255 - alpha) + 127) / 255
-}
-
-const fn composite_color(source: COLORREF, alpha: u8, background: COLORREF) -> COLORREF {
-    let alpha = alpha as u32;
-    rgb(
-        composite_channel(source.0 & 0xff, alpha, background.0 & 0xff) as u8,
-        composite_channel((source.0 >> 8) & 0xff, alpha, (background.0 >> 8) & 0xff) as u8,
-        composite_channel((source.0 >> 16) & 0xff, alpha, (background.0 >> 16) & 0xff) as u8,
-    )
 }
 
 impl Palette {
@@ -151,143 +116,25 @@ impl Palette {
         progress: rgb(113, 199, 132),
     };
 
-    /// Uses DWM's black glass key for window/nav pixels that should reveal a system backdrop.
-    /// Ordinary buttons use the material overlay directly. Classic Edit, ComboBox, ListBox and
-    /// ListView child HWNDs cannot publish per-pixel alpha into the parent DWM surface reliably, so
-    /// they use the exact same overlay resolved against the documented Mica fallback neutral.
-    /// Highlighted actions and selected rows remain opaque.
-    pub const fn with_system_backdrop_surface(mut self) -> Self {
-        let background = self.system_backdrop_edge_fallback();
-        let normal = self.material_surface_visual(MaterialSurfaceState::Normal);
-        let hot = self.material_surface_visual(MaterialSurfaceState::Hot);
-        let pressed = self.material_surface_visual(MaterialSurfaceState::Pressed);
-        self.edit = composite_color(normal.fill, normal.fill_alpha, background);
-        self.button = self.edit;
-        self.button_hot = composite_color(hot.fill, hot.fill_alpha, background);
-        self.button_pressed = composite_color(pressed.fill, pressed.fill_alpha, background);
-        self.border = composite_color(normal.border, normal.border_alpha, background);
-        self.separator = self.border;
-        self.window = COLORREF(0);
-        self.nav = COLORREF(0);
-        self
-    }
-
-    pub(crate) const fn material_surface_visual(
-        self,
-        state: MaterialSurfaceState,
-    ) -> MaterialSurfaceVisual {
-        if self.dark {
-            let (fill, fill_alpha) = match state {
-                // Mica is the base layer, not the control surface itself. Keep enough opacity
-                // that dark controls remain distinct from the wallpaper while preserving the
-                // cool blue-grey material tint used by the original audited UI.
-                MaterialSurfaceState::Normal => (rgb(72, 88, 120), 180),
-                MaterialSurfaceState::Hot => (rgb(85, 105, 145), 200),
-                MaterialSurfaceState::Pressed => (rgb(60, 75, 105), 190),
-                MaterialSurfaceState::Disabled => (rgb(64, 78, 108), 154),
-            };
-            MaterialSurfaceVisual {
-                fill,
-                border: rgb(145, 165, 205),
-                fill_alpha,
-                border_alpha: if matches!(state, MaterialSurfaceState::Disabled) {
-                    104
-                } else {
-                    130
-                },
-            }
-        } else {
-            let (fill, fill_alpha) = match state {
-                // Pure white over light Mica reads as a solid rectangle. A cooler, lower-alpha
-                // surface leaves the material perceptible without sacrificing field contrast.
-                MaterialSurfaceState::Normal => (rgb(232, 239, 248), 118),
-                MaterialSurfaceState::Hot => (rgb(238, 244, 252), 145),
-                MaterialSurfaceState::Pressed => (rgb(214, 224, 236), 138),
-                MaterialSurfaceState::Disabled => (rgb(224, 233, 244), 104),
-            };
-            MaterialSurfaceVisual {
-                fill,
-                border: rgb(113, 131, 154),
-                fill_alpha,
-                border_alpha: if matches!(state, MaterialSurfaceState::Disabled) {
-                    52
-                } else {
-                    64
-                },
-            }
-        }
-    }
-
-    const fn uses_system_backdrop_surface(self) -> bool {
-        self.window.0 == 0 && self.nav.0 == 0
-    }
-
-    /// Classic child HWNDs are not independent DWM alpha surfaces. Their Edit client is published
-    /// as one opaque BGRA frame below, so both background and text must use final theme colours.
-    /// Treating them as glass contributions makes black light-theme glyphs transparent/white.
+    /// Returns the final opaque field color used by the native Edit client.
     pub(crate) const fn edit_brush_color(self) -> COLORREF {
         self.edit
     }
 
     pub(crate) unsafe fn edit_brush_color_for(self, _control: HWND) -> COLORREF {
-        // A compatible bitmap plus BitBlt makes the Edit update atomic, but it does not turn a
-        // classic child HWND into an independent opaque-alpha surface. DWM still resolves those
-        // RGB values over the extended frame, so always submit the material contribution rather
-        // than the already-resolved field colour; otherwise dark fields are composited twice.
         self.edit_brush_color()
     }
 
-    /// The atomic Edit painter repairs every output pixel to opaque BGRA after USER32 renders it,
-    /// but the classic child target DC still treats exact black as the extended-frame glass key.
-    /// Use the same near-black foreground as material labels in light mode; visually it matches
-    /// ordinary button text while remaining an opaque DWM contribution.
     pub(crate) const fn edit_text_color(self) -> COLORREF {
-        if self.uses_system_backdrop_surface() && !self.dark {
-            self.foreground_black()
-        } else {
-            self.text
-        }
+        self.text
     }
 
     pub(crate) unsafe fn edit_text_color_for(self, _control: HWND) -> COLORREF {
         self.edit_text_color()
     }
 
-    /// Opaque colour used only while rasterizing an antialiased edge on a stock child HWND.
-    ///
-    /// DWM resolves the real system material on the top-level window, but a classic Edit,
-    /// ComboBox or ListView is not an independent per-pixel-alpha surface.  Publishing partially
-    /// transparent BGRA into those child DCs turns the edge into black/white corner pixels.  The
-    /// Windows 11 Mica fallback neutrals are deliberately close to the resolved material and let
-    /// us premix the few boundary pixels without replacing the material behind the control.
-    const fn system_backdrop_edge_fallback(self) -> COLORREF {
-        if self.dark {
-            rgb(32, 32, 32)
-        } else {
-            rgb(243, 243, 243)
-        }
-    }
-
-    /// A light material needs a slightly clearer one-pixel field stroke than the opaque page.
-    /// The same absolute colour is used for both straight edges and rounded samples.
     const fn control_border(self) -> COLORREF {
-        if self.uses_system_backdrop_surface() && !self.dark {
-            self.separator
-        } else {
-            self.border
-        }
-    }
-
-    pub const fn foreground_black(self) -> COLORREF {
-        if self.uses_system_backdrop_surface() {
-            if self.dark {
-                rgb(1, 1, 1)
-            } else {
-                rgb(24, 24, 24)
-            }
-        } else {
-            rgb(0, 0, 0)
-        }
+        self.border
     }
 
     pub fn system() -> Self {
@@ -428,7 +275,7 @@ pub unsafe fn apply_control_theme(control: HWND, palette: Palette, kind: NativeC
             0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
-        apply_material_rounded_control_region(control, palette);
+        clear_legacy_control_region(control);
         let _ = RedrawWindow(
             control,
             None,
@@ -449,7 +296,7 @@ pub unsafe fn apply_control_theme(control: HWND, palette: Palette, kind: NativeC
             ROUNDED_CONTROL_SUBCLASS_ID,
             palette_reference(palette),
         );
-        apply_material_rounded_control_region(control, palette);
+        clear_legacy_control_region(control);
         let _ = InvalidateRect(control, None, false);
     } else if is_edit {
         apply_single_border_style(control);
@@ -486,7 +333,7 @@ pub unsafe fn apply_control_theme(control: HWND, palette: Palette, kind: NativeC
             ROUNDED_CONTROL_SUBCLASS_ID,
             palette_reference(palette),
         );
-        apply_material_rounded_control_region(control, palette);
+        clear_legacy_control_region(control);
         let _ = InvalidateRect(control, None, false);
     } else if matches!(
         kind,
@@ -574,132 +421,6 @@ unsafe fn install_combo_selection_item_subclass(combo: HWND, palette: Palette) {
         palette_reference(palette),
     );
     repaint_combo_selection_item_now(info.hwndItem, palette);
-}
-
-const BACKDROP_STATIC_SUBCLASS_ID: usize = 0x4c52_4253;
-
-/// Installs alpha-aware text painting on every plain STATIC descendant. Direct labels retain
-/// UxTheme's glass compositor; labels inside the tool-dialog content child use a deterministic
-/// premultiplied glyph mask because nested HWND redirection otherwise discards their text alpha.
-pub unsafe fn apply_backdrop_composition_to_descendants(root: HWND, palette: Palette) {
-    let reference = palette_reference(palette);
-    let _ = EnumChildWindows(
-        root,
-        Some(prepare_backdrop_descendant),
-        LPARAM(reference as isize),
-    );
-}
-
-unsafe extern "system" fn prepare_backdrop_descendant(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let palette = palette_from_reference(lparam.0 as usize);
-    let class_name = control_class_name(hwnd);
-    let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-    // SS_LEFT/SS_CENTER/SS_RIGHT are the only text-only STATIC types. Icons, bitmaps, frames and
-    // owner-draw statics retain their existing renderer.
-    if class_name.eq_ignore_ascii_case("Static") && style & 0x1f <= 2 {
-        let _ = SetWindowSubclass(
-            hwnd,
-            Some(backdrop_static_subclass),
-            BACKDROP_STATIC_SUBCLASS_ID,
-            palette_reference(palette),
-        );
-        let _ = InvalidateRect(hwnd, None, false);
-    }
-    BOOL(1)
-}
-
-unsafe extern "system" fn backdrop_static_subclass(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _subclass_id: usize,
-    reference_data: usize,
-) -> LRESULT {
-    match message {
-        WM_PAINT => {
-            let palette = palette_from_reference(reference_data);
-            if palette.uses_system_backdrop_surface() && !palette.dark {
-                paint_backdrop_static(hwnd, palette);
-                LRESULT(0)
-            } else {
-                DefSubclassProc(hwnd, message, wparam, lparam)
-            }
-        }
-        WM_ENABLE | WM_SETTEXT | WM_THEMECHANGED => {
-            let result = DefSubclassProc(hwnd, message, wparam, lparam);
-            let _ = InvalidateRect(hwnd, None, false);
-            result
-        }
-        WM_NCDESTROY => {
-            let _ = RemoveWindowSubclass(
-                hwnd,
-                Some(backdrop_static_subclass),
-                BACKDROP_STATIC_SUBCLASS_ID,
-            );
-            DefSubclassProc(hwnd, message, wparam, lparam)
-        }
-        _ => DefSubclassProc(hwnd, message, wparam, lparam),
-    }
-}
-
-unsafe fn paint_backdrop_static(hwnd: HWND, palette: Palette) {
-    let mut paint = PAINTSTRUCT::default();
-    let dc = BeginPaint(hwnd, &mut paint);
-    let mut rect = RECT::default();
-    let _ = GetClientRect(hwnd, &mut rect);
-    let length = GetWindowTextLengthW(hwnd).max(0) as usize;
-    let mut text = vec![0u16; length + 1];
-    let copied = GetWindowTextW(hwnd, &mut text).max(0) as usize;
-    text.truncate(copied);
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
-    if width > 0 && height > 0 {
-        // A solid fallback fill turns every label HWND into the white rectangles visible in the
-        // user's light-Mica screenshot whenever DWM drops the dark glyph contribution. Clear the
-        // child to the real glass key, then publish only a premultiplied glyph mask. The parent
-        // backdrop remains visible around the text and no opaque intermediate label can exist.
-        let glass = CreateSolidBrush(COLORREF(0));
-        let _ = FillRect(dc, &rect, glass);
-        let _ = DeleteObject(glass);
-        let font = SendMessageW(hwnd, WM_GETFONT, WPARAM(0), LPARAM(0));
-        let old_font = (font.0 != 0)
-            .then(|| SelectObject(dc, windows::Win32::Graphics::Gdi::HGDIOBJ(font.0 as *mut _)));
-        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        let mut flags = DT_NOPREFIX;
-        flags |= match style & 0x3 {
-            1 => DT_CENTER,
-            2 => DT_RIGHT,
-            _ => windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT(0),
-        };
-        let dpi = GetDpiForWindow(hwnd).max(96);
-        if style & 0x0200 != 0 {
-            flags |= DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS;
-        } else if height <= scale(36, dpi) {
-            // Match the stock SS_LEFT baseline used without Mica. Vertically centring every short
-            // STATIC only in the material painter made all labels jump down on activation.
-            flags |= DT_SINGLELINE | DT_END_ELLIPSIS;
-        } else {
-            flags |= DT_WORDBREAK;
-        }
-        draw_alpha_composited_text(
-            hwnd,
-            dc,
-            &text,
-            &mut rect,
-            flags,
-            if IsWindowEnabled(hwnd).as_bool() {
-                palette.foreground_black()
-            } else {
-                palette.text_disabled
-            },
-            true,
-        );
-        if let Some(old_font) = old_font {
-            let _ = SelectObject(dc, old_font);
-        }
-    }
-    let _ = EndPaint(hwnd, &paint);
 }
 
 unsafe fn apply_combo_popup_native_chrome(popup: HWND, palette: Palette) {
@@ -839,7 +560,7 @@ pub unsafe fn apply_list_view_theme(list: HWND, palette: Palette) -> Option<HWND
     // antialiased overlay installed below.
     apply_borderless_style(list);
     apply_control_theme(list, palette, NativeControlKind::ListView);
-    apply_material_rounded_control_region(list, palette);
+    clear_legacy_control_region(list);
     // Comctl32 v6 explicitly provides double-buffered report painting for this purpose.  Some
     // callers already request it while creating their ListView, but applying it here as well keeps
     // every report (including the main install list in reduced WinPE builds) on the same path.
@@ -870,13 +591,11 @@ pub unsafe fn apply_list_view_theme(list: HWND, palette: Palette) -> Option<HWND
     if let Ok(parent) = GetParent(list) {
         let list_value = list.0 as usize;
         let dark_flag = usize::from(palette.dark) << (usize::BITS - 1);
-        let backdrop_flag =
-            usize::from(palette.uses_system_backdrop_surface()) << (usize::BITS - 2);
         let _ = SetWindowSubclass(
             parent,
             Some(list_view_parent_subclass),
             LIST_VIEW_PARENT_SUBCLASS_ID ^ list_value,
-            list_value | dark_flag | backdrop_flag,
+            list_value | dark_flag,
         );
     }
     let header = SendMessageW(list, 0x101F, WPARAM(0), LPARAM(0)); // LVM_GETHEADER
@@ -960,118 +679,11 @@ const COMBO_SELECTION_ITEM_PREPARED_PROPERTY: PCWSTR =
     w!("LetRecovery.InnoCombo.SelectionPrepared");
 const RADIO_BUTTON_HOT_PROPERTY: PCWSTR = w!("LetRecovery.InnoRadio.Hot");
 const PALETTE_REFERENCE_DARK: usize = 0x1;
-const PALETTE_REFERENCE_SYSTEM_BACKDROP: usize = 0x2;
 const CHECK_BOX_HOT_PROPERTY: PCWSTR = w!("LetRecovery.InnoCheck.Hot");
 const WM_MOUSELEAVE_MESSAGE: u32 = 0x02a3;
 const WM_NCMOUSEMOVE_MESSAGE: u32 = 0x00a0;
 const WM_NCMOUSELEAVE_MESSAGE: u32 = 0x02a2;
 const WM_REPAINT_TRACKING_COMBO: u32 = 0x8000 + 0x4c5;
-
-unsafe fn update_existing_subclass_reference(
-    hwnd: HWND,
-    procedure: SUBCLASSPROC,
-    subclass_id: usize,
-    reference_data: usize,
-) {
-    let mut current_reference = 0usize;
-    if GetWindowSubclass(hwnd, procedure, subclass_id, Some(&mut current_reference)).as_bool() {
-        let _ = SetWindowSubclass(hwnd, procedure, subclass_id, reference_data);
-    }
-}
-
-/// Refreshes only palette references after a top-level Mica activation transition.
-///
-/// The light/dark system theme has not changed, so reapplying UxTheme classes, non-client styles
-/// and `SWP_FRAMECHANGED` is both unnecessary and visibly harmful: Edit recalculates its client
-/// metrics and STATIC text changes rasterization between the inactive and active frames.  Keep the
-/// existing native control structure and update only subclasses/colours that actually depend on
-/// the material palette.
-pub unsafe fn refresh_material_palette_to_descendants(root: HWND, palette: Palette) {
-    let _ = EnumChildWindows(
-        root,
-        Some(refresh_material_palette_descendant),
-        LPARAM(palette_reference(palette) as isize),
-    );
-}
-
-unsafe extern "system" fn refresh_material_palette_descendant(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let reference = lparam.0 as usize;
-    let palette = palette_from_reference(reference);
-    let palette_subclasses: [(SUBCLASSPROC, usize); 10] = [
-        (Some(check_box_subclass), CHECK_BOX_SUBCLASS_ID),
-        (Some(radio_button_subclass), RADIO_BUTTON_SUBCLASS_ID),
-        (Some(rounded_control_subclass), ROUNDED_CONTROL_SUBCLASS_ID),
-        (
-            Some(single_line_edit_subclass),
-            SINGLE_LINE_EDIT_SUBCLASS_ID,
-        ),
-        (
-            Some(single_line_edit_frame_subclass),
-            SINGLE_LINE_EDIT_FRAME_SUBCLASS_ID,
-        ),
-        (
-            Some(combo_selection_item_subclass),
-            COMBO_SELECTION_ITEM_SUBCLASS_ID,
-        ),
-        (Some(backdrop_static_subclass), BACKDROP_STATIC_SUBCLASS_ID),
-        (Some(list_view_subclass), LIST_VIEW_SUBCLASS_ID),
-        (Some(progress_subclass), PROGRESS_SUBCLASS_ID),
-        (Some(trackbar_subclass), TRACKBAR_SUBCLASS_ID),
-    ];
-    for (procedure, subclass_id) in palette_subclasses {
-        update_existing_subclass_reference(hwnd, procedure, subclass_id, reference);
-    }
-
-    let class_name = control_class_name(hwnd);
-    if class_name.eq_ignore_ascii_case("SysListView32") {
-        set_list_view_colors(hwnd, palette);
-        if let Ok(parent) = GetParent(hwnd) {
-            let list_value = hwnd.0 as usize;
-            let dark_flag = usize::from(palette.dark) << (usize::BITS - 1);
-            let backdrop_flag =
-                usize::from(palette.uses_system_backdrop_surface()) << (usize::BITS - 2);
-            update_existing_subclass_reference(
-                parent,
-                Some(list_view_parent_subclass),
-                LIST_VIEW_PARENT_SUBCLASS_ID ^ list_value,
-                list_value | dark_flag | backdrop_flag,
-            );
-        }
-        let header = HWND(SendMessageW(hwnd, 0x101f, WPARAM(0), LPARAM(0)).0 as *mut _);
-        if !header.is_invalid() {
-            update_existing_subclass_reference(
-                header,
-                Some(header_subclass),
-                HEADER_SUBCLASS_ID,
-                reference,
-            );
-        }
-    } else if class_name.eq_ignore_ascii_case("ComboBox") {
-        let mut info = COMBOBOXINFO {
-            cbSize: std::mem::size_of::<COMBOBOXINFO>() as u32,
-            ..Default::default()
-        };
-        if GetComboBoxInfo(hwnd, &mut info).is_ok() {
-            if !info.hwndItem.is_invalid() && info.hwndItem != hwnd {
-                update_existing_subclass_reference(
-                    info.hwndItem,
-                    Some(combo_selection_item_subclass),
-                    COMBO_SELECTION_ITEM_SUBCLASS_ID,
-                    reference,
-                );
-            }
-            if !info.hwndList.is_invalid() {
-                update_existing_subclass_reference(
-                    info.hwndList,
-                    Some(rounded_control_subclass),
-                    ROUNDED_CONTROL_SUBCLASS_ID,
-                    reference,
-                );
-            }
-        }
-    }
-    BOOL(1)
-}
 
 /// Messages whose USER32/comctl32 default handling may repaint a native non-client scrollbar.
 /// The rounded frame must be overlaid only after that handling finishes; otherwise the scrollbar
@@ -1106,29 +718,18 @@ const fn list_view_scrolls_client_pixels(message: u32) -> bool {
 }
 
 const fn palette_reference(palette: Palette) -> usize {
-    let dark = if palette.dark {
+    if palette.dark {
         PALETTE_REFERENCE_DARK
     } else {
         0
-    };
-    let backdrop = if palette.uses_system_backdrop_surface() {
-        PALETTE_REFERENCE_SYSTEM_BACKDROP
-    } else {
-        0
-    };
-    dark | backdrop
+    }
 }
 
 const fn palette_from_reference(reference_data: usize) -> Palette {
-    let palette = if reference_data & PALETTE_REFERENCE_DARK != 0 {
+    if reference_data & PALETTE_REFERENCE_DARK != 0 {
         Palette::DARK
     } else {
         Palette::LIGHT
-    };
-    if reference_data & PALETTE_REFERENCE_SYSTEM_BACKDROP != 0 {
-        palette.with_system_backdrop_surface()
-    } else {
-        palette
     }
 }
 
@@ -1339,34 +940,11 @@ fn embedded_button_glyph(
     &WIN11_CHECKBOX_THEME_GLYPHS[((mode * 4 + dpi) * 8) + state]
 }
 
-const fn preserve_visible_black_on_system_backdrop(
-    background: u32,
-    alpha: u32,
-    blue: u32,
-    green: u32,
-    red: u32,
-) -> (u32, u32, u32) {
-    if background == 0 && alpha != 0 && blue == 0 && green == 0 && red == 0 {
-        (1, 1, 1)
-    } else {
-        (blue, green, red)
-    }
-}
-
-const fn checkbox_material_fallback(palette: Palette) -> Option<COLORREF> {
-    if palette.uses_system_backdrop_surface() {
-        Some(palette.system_backdrop_edge_fallback())
-    } else {
-        None
-    }
-}
-
 unsafe fn draw_embedded_button_glyph(
     dc: HDC,
     rect: RECT,
     glyph: &EmbeddedButtonGlyph,
     background: COLORREF,
-    material_fallback: Option<COLORREF>,
 ) {
     let width = (rect.right - rect.left).max(0);
     let height = (rect.bottom - rect.top).max(0);
@@ -1374,18 +952,9 @@ unsafe fn draw_embedded_button_glyph(
         return;
     }
     let background = background.0;
-    let blend_background = if background == 0 {
-        // Premix the complete fixed Win11 glyph tile against the documented neutral material
-        // fallback. Mixing partially covered and fully transparent texels against literal black
-        // is what made the original rounded checkbox look square and left four dark feet in light
-        // mode. This changes only the tile's backdrop pixels, never its geometry or state image.
-        material_fallback.map_or(background, |color| color.0)
-    } else {
-        background
-    };
-    let background_red = blend_background & 0xff;
-    let background_green = (blend_background >> 8) & 0xff;
-    let background_blue = (blend_background >> 16) & 0xff;
+    let background_red = background & 0xff;
+    let background_green = (background >> 8) & 0xff;
+    let background_blue = (background >> 16) & 0xff;
     let mut composed = Vec::with_capacity(glyph.bgra.len());
     for pixel in glyph.bgra.chunks_exact(4) {
         let alpha = u32::from(pixel[3]);
@@ -1404,10 +973,6 @@ unsafe fn draw_embedded_button_glyph(
         let blue = compose(pixel[0], background_blue);
         let green = compose(pixel[1], background_green);
         let red = compose(pixel[2], background_red);
-        // Prevent an opaque black check mark or outline from being interpreted as another DWM
-        // transparent hole when the surrounding page itself uses the black glass key.
-        let (blue, green, red) =
-            preserve_visible_black_on_system_backdrop(background, alpha, blue, green, red);
         composed.extend_from_slice(&[blue as u8, green as u8, red as u8, 255]);
     }
 
@@ -1495,7 +1060,6 @@ unsafe fn paint_embedded_windows11_checkbox(
         glyph_rect,
         embedded_button_glyph(palette.dark, dpi, state, checked),
         palette.window,
-        checkbox_material_fallback(palette),
     );
 
     let text_length = GetWindowTextLengthW(hwnd).max(0) as usize;
@@ -1507,8 +1071,7 @@ unsafe fn paint_embedded_windows11_checkbox(
         let old_font = (font.0 != 0)
             .then(|| SelectObject(dc, windows::Win32::Graphics::Gdi::HGDIOBJ(font.0 as *mut _)));
         let mut text_rect = caption_rect;
-        draw_alpha_composited_text(
-            hwnd,
+        draw_native_text(
             dc,
             &text,
             &mut text_rect,
@@ -1518,7 +1081,6 @@ unsafe fn paint_embedded_windows11_checkbox(
             } else {
                 palette.text
             },
-            palette.uses_system_backdrop_surface() && !palette.dark,
         );
         if let Some(old_font) = old_font {
             let _ = SelectObject(dc, old_font);
@@ -1594,7 +1156,7 @@ fn radio_state_colors(
             palette.accent_fill
         };
         let centre = if palette.dark {
-            palette.foreground_black()
+            rgb(0, 0, 0)
         } else {
             rgb(255, 255, 255)
         };
@@ -1640,9 +1202,7 @@ fn weighted_radio_color(
     COLORREF(channel(0) | channel(8) | channel(16))
 }
 
-/// Produces a top-down BGRA glyph. Material mode keeps pixels outside the circular coverage fully
-/// transparent and premultiplies the antialiased edge; ordinary mode remains opaque against the
-/// normal page background. Both paths evaluate eight-by-eight coverage at the final DPI size.
+/// Produces a top-down opaque BGRA glyph using eight-by-eight coverage at the final DPI size.
 fn radio_glyph_bgra(side: i32, palette: Palette, state: ControlState, checked: bool) -> Vec<u8> {
     const SAMPLES: i32 = 8;
     let side = side.max(1);
@@ -1680,37 +1240,21 @@ fn radio_glyph_bgra(side: i32, palette: Palette, state: ControlState, checked: b
                     }
                 }
             }
-            if palette.uses_system_backdrop_surface() {
-                let covered = primary_samples + secondary_samples;
-                let premultiplied_channel = |shift: u32| {
-                    ((((primary.0 >> shift) & 0xff) * primary_samples
-                        + ((secondary.0 >> shift) & 0xff) * secondary_samples
-                        + 32)
-                        / 64) as u8
-                };
-                pixels.extend_from_slice(&[
-                    premultiplied_channel(16),
-                    premultiplied_channel(8),
-                    premultiplied_channel(0),
-                    ((covered * 255 + 32) / 64) as u8,
-                ]);
-            } else {
-                let color = weighted_radio_color(
-                    palette.window,
-                    background_samples,
-                    primary,
-                    primary_samples,
-                    secondary,
-                    secondary_samples,
-                )
-                .0;
-                pixels.extend_from_slice(&[
-                    ((color >> 16) & 0xff) as u8,
-                    ((color >> 8) & 0xff) as u8,
-                    (color & 0xff) as u8,
-                    255,
-                ]);
-            }
+            let color = weighted_radio_color(
+                palette.window,
+                background_samples,
+                primary,
+                primary_samples,
+                secondary,
+                secondary_samples,
+            )
+            .0;
+            pixels.extend_from_slice(&[
+                ((color >> 16) & 0xff) as u8,
+                ((color >> 8) & 0xff) as u8,
+                (color & 0xff) as u8,
+                255,
+            ]);
         }
     }
     pixels
@@ -1730,11 +1274,6 @@ unsafe fn draw_radio_glyph(
         return;
     }
     let pixels = radio_glyph_bgra(side, palette, state, checked);
-    if palette.uses_system_backdrop_surface()
-        && alpha_blend_premultiplied_bgra(dc, rect.left, rect.top, side, side, &pixels)
-    {
-        return;
-    }
     let bitmap = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -1846,8 +1385,7 @@ unsafe fn paint_radio_button(hwnd: HWND, palette: Palette, state: ControlState, 
         let old_font = (font.0 != 0)
             .then(|| SelectObject(dc, windows::Win32::Graphics::Gdi::HGDIOBJ(font.0 as *mut _)));
         let mut text_rect = geometry.text;
-        draw_alpha_composited_text(
-            hwnd,
+        draw_native_text(
             dc,
             &text,
             &mut text_rect,
@@ -1857,7 +1395,6 @@ unsafe fn paint_radio_button(hwnd: HWND, palette: Palette, state: ControlState, 
             } else {
                 palette.text
             },
-            palette.uses_system_backdrop_surface() && !palette.dark,
         );
         if let Some(old_font) = old_font {
             let _ = SelectObject(dc, old_font);
@@ -1945,14 +1482,12 @@ unsafe fn paint_header(hwnd: HWND, palette: Palette) {
         let mut text_rect = rect;
         text_rect.left += inset;
         text_rect.right -= inset.min((text_rect.right - text_rect.left).max(0));
-        draw_alpha_composited_text(
-            hwnd,
+        draw_native_text(
             dc,
             &text,
             &mut text_rect,
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
             palette.text,
-            palette.uses_system_backdrop_surface() && !palette.dark,
         );
         let separator = RECT {
             left: rect.right - 1,
@@ -2059,7 +1594,7 @@ unsafe extern "system" fn list_view_subclass(
             let palette = palette_from_reference(reference_data);
             set_list_view_colors(hwnd, palette);
             if matches!(message, WM_SIZE | WM_THEMECHANGED) {
-                apply_material_rounded_control_region(hwnd, palette);
+                clear_legacy_control_region(hwnd);
             }
             let _ = InvalidateRect(hwnd, None, false);
             result
@@ -2301,22 +1836,9 @@ unsafe extern "system" fn single_line_edit_subclass(
     wparam: WPARAM,
     lparam: LPARAM,
     _subclass_id: usize,
-    reference_data: usize,
+    _reference_data: usize,
 ) -> LRESULT {
     match message {
-        WM_PAINT => {
-            let palette = palette_from_reference(reference_data);
-            if palette.uses_system_backdrop_surface() {
-                paint_single_line_edit_client_atomic(hwnd, palette);
-                LRESULT(0)
-            } else {
-                // Ordinary opaque windows must keep USER32's native Edit client metrics.  The
-                // material-only WM_PRINTCLIENT buffer does not preserve the stock left inset and
-                // vertical baseline while the user is editing, which makes focused text jump up
-                // and touch the left frame even though the idle field is laid out correctly.
-                DefSubclassProc(hwnd, message, wparam, lparam)
-            }
-        }
         WM_NCPAINT => DefSubclassProc(hwnd, message, wparam, lparam),
         WM_MOUSEMOVE => {
             let result = DefSubclassProc(hwnd, message, wparam, lparam);
@@ -2330,43 +1852,9 @@ unsafe extern "system" fn single_line_edit_subclass(
             repaint_single_line_edit_frame(hwnd, false);
             result
         }
-        message if edit_message_may_change_visible_text(message, wparam.0) => {
-            // USER32 performs user-initiated Edit operations synchronously and can draw the new
-            // glyphs directly before the next WM_PAINT. Let it update the native text/selection
-            // state first, then synchronously replace the visible field with one complete BGRA
-            // frame. Do not send WM_SETREDRAW(FALSE) here: Windows removes WS_VISIBLE while redraw
-            // is disabled, which makes the immediate final paint miss this child altogether.
-            let result = DefSubclassProc(hwnd, message, wparam, lparam);
-            let palette = palette_from_reference(reference_data);
-            if palette.uses_system_backdrop_surface() {
-                let _ = RedrawWindow(
-                    hwnd,
-                    None,
-                    None,
-                    RDW_FRAME | RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW,
-                );
-            } else {
-                // DefWindowProc already published the native glyphs, selection and caret inside
-                // the centred child. The sibling frame is independent and needs no text repaint.
-            }
-            result
-        }
         WM_ENABLE | WM_SETFOCUS | WM_KILLFOCUS | WM_SIZE | WM_THEMECHANGED => {
             let result = DefSubclassProc(hwnd, message, wparam, lparam);
-            let palette = palette_from_reference(reference_data);
-            if palette.uses_system_backdrop_surface() {
-                let _ = RedrawWindow(
-                    hwnd,
-                    None,
-                    None,
-                    RDW_FRAME | RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW,
-                );
-            } else {
-                repaint_single_line_edit_frame(hwnd, true);
-            }
-            if palette.uses_system_backdrop_surface() {
-                repaint_single_line_edit_frame(hwnd, true);
-            }
+            repaint_single_line_edit_frame(hwnd, true);
             result
         }
         WM_NCDESTROY => {
@@ -2380,127 +1868,6 @@ unsafe extern "system" fn single_line_edit_subclass(
         }
         _ => DefSubclassProc(hwnd, message, wparam, lparam),
     }
-}
-
-const fn edit_message_may_change_visible_text(message: u32, wparam: usize) -> bool {
-    matches!(
-        message,
-        0x000c // WM_SETTEXT
-            | 0x00c2 // EM_REPLACESEL
-            | 0x0102 // WM_CHAR (including Backspace)
-            | 0x0109 // WM_UNICHAR
-            | 0x010f // WM_IME_COMPOSITION
-            | 0x0300 // WM_CUT
-            | 0x0302 // WM_PASTE
-            | 0x0303 // WM_CLEAR
-            | 0x0304 // WM_UNDO
-    ) || (message == WM_KEYDOWN && wparam == 0x2e) // VK_DELETE
-}
-
-/// Publishes the complete Edit background and current native text buffer as one opaque BGRA frame.
-/// USER32 continues to own input state, selection, caret, IME, hit testing and accessibility.
-unsafe fn paint_single_line_edit_client_atomic(hwnd: HWND, palette: Palette) {
-    const WM_PRINTCLIENT: u32 = 0x0318;
-    const PRF_CLIENT: isize = 0x0000_0004;
-
-    let mut paint = PAINTSTRUCT::default();
-    let target_dc = BeginPaint(hwnd, &mut paint);
-    if target_dc.is_invalid() {
-        return;
-    }
-    let mut client = RECT::default();
-    let client_valid = GetClientRect(hwnd, &mut client).is_ok()
-        && client.right > client.left
-        && client.bottom > client.top;
-    if client_valid {
-        let width = client.right - client.left;
-        let height = client.bottom - client.top;
-        let buffer_dc = CreateCompatibleDC(target_dc);
-        let bitmap_info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width,
-                biHeight: -height,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                biSizeImage: (width * height * 4) as u32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits = std::ptr::null_mut::<core::ffi::c_void>();
-        let bitmap = if buffer_dc.is_invalid() {
-            None
-        } else {
-            CreateDIBSection(
-                buffer_dc,
-                &bitmap_info,
-                DIB_RGB_COLORS,
-                &mut bits,
-                HANDLE::default(),
-                0,
-            )
-            .ok()
-        };
-        if let Some(bitmap) = bitmap {
-            let old_bitmap = SelectObject(buffer_dc, bitmap);
-            let background = CreateSolidBrush(palette.edit);
-            let _ = FillRect(buffer_dc, &client, background);
-            let _ = DeleteObject(background);
-            // Ask USER32 to draw the current visible Edit state into the same opaque surface. This
-            // preserves horizontal scrolling, selection, caret-related text positioning and IME
-            // composition; manually drawing GetWindowText from x=0 duplicates or shifts the text
-            // as soon as the native Edit scrolls while the user is typing.
-            let _ = DefSubclassProc(
-                hwnd,
-                WM_PRINTCLIENT,
-                WPARAM(buffer_dc.0 as usize),
-                LPARAM(PRF_CLIENT),
-            );
-            let _ = GdiFlush();
-            // GDI leaves the alpha byte undefined/zero. On an extended DWM frame that turns the
-            // correctly black light-theme glyphs into transparent holes. The complete Edit client
-            // is an opaque resolved material surface, so repair every pixel before publishing it.
-            for pixel in std::slice::from_raw_parts_mut(
-                bits.cast::<u8>(),
-                width as usize * height as usize * 4,
-            )
-            .chunks_exact_mut(4)
-            {
-                pixel[3] = 255;
-            }
-            let _ = SetDIBitsToDevice(
-                target_dc,
-                client.left,
-                client.top,
-                width as u32,
-                height as u32,
-                0,
-                0,
-                0,
-                height as u32,
-                bits.cast_const(),
-                &bitmap_info,
-                DIB_RGB_COLORS,
-            );
-            let _ = SelectObject(buffer_dc, old_bitmap);
-        } else {
-            let _ = DefSubclassProc(
-                hwnd,
-                WM_PRINTCLIENT,
-                WPARAM(target_dc.0 as usize),
-                LPARAM(PRF_CLIENT),
-            );
-        }
-        if let Some(bitmap) = bitmap {
-            let _ = DeleteObject(bitmap);
-        }
-        if !buffer_dc.is_invalid() {
-            let _ = DeleteDC(buffer_dc);
-        }
-    }
-    let _ = EndPaint(hwnd, &paint);
 }
 
 unsafe extern "system" fn combo_selection_item_subclass(
@@ -2736,10 +2103,7 @@ unsafe extern "system" fn rounded_control_subclass(
                 }
             } else {
                 if matches!(message, WM_SIZE | WM_THEMECHANGED) {
-                    apply_material_rounded_control_region(
-                        hwnd,
-                        palette_from_reference(reference_data),
-                    );
+                    clear_legacy_control_region(hwnd);
                 }
                 let _ = InvalidateRect(hwnd, None, false);
             }
@@ -2993,7 +2357,7 @@ unsafe fn clip_combo_to_closed_field(hwnd: HWND, _palette: Palette) {
 ///
 /// A GDI region has no partial coverage and cannot represent the visible antialiased edge. The
 /// deterministic last-paint transaction replaces the small exterior corner pixels instead.
-unsafe fn apply_material_rounded_control_region(hwnd: HWND, _palette: Palette) {
+unsafe fn clear_legacy_control_region(hwnd: HWND) {
     clear_control_window_region(hwnd);
 }
 
@@ -3164,8 +2528,7 @@ unsafe fn draw_combo_selected_text(hwnd: HWND, dc: HDC, mut text_rect: RECT, pal
     } else {
         DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX
     };
-    draw_alpha_composited_text(
-        hwnd,
+    draw_native_text(
         dc,
         &text,
         &mut text_rect,
@@ -3175,7 +2538,6 @@ unsafe fn draw_combo_selected_text(hwnd: HWND, dc: HDC, mut text_rect: RECT, pal
         } else {
             palette.text_disabled
         },
-        palette.uses_system_backdrop_surface() && !palette.dark,
     );
     if let Some(old_font) = old_font {
         let _ = SelectObject(dc, old_font);
@@ -3460,8 +2822,6 @@ unsafe fn draw_rounded_control_frame_to_dc(
     // CreateRoundRectRgn/FrameRgn is an integer region operation and therefore cannot be the
     // visible outline: at 96-200 DPI it produces the grainy staircase reported by the user. The
     // deterministic coverage calculation paints the straight stroke and every corner sample.
-    // Stock Edit children remain ordinary non-layered HWNDs, so the outer glass-key pixels expose
-    // the same parent material as ComboBox and ListView instead of relying on a cached bitmap.
     let exterior = rounded_control_exterior(palette);
     draw_antialiased_control_frame(dc, rect, geometry, interior, border, exterior);
 }
@@ -3578,14 +2938,12 @@ unsafe fn paint_list_box_rows(hwnd: HWND, palette: Palette) {
                 .position(|value| *value == 0)
                 .unwrap_or(text.len()),
         );
-        draw_alpha_composited_text(
-            hwnd,
+        draw_native_text(
             dc,
             &text,
             &mut row,
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
             text_color,
-            palette.uses_system_backdrop_surface() && !palette.dark,
         );
     }
     if let Some(old_font) = old_font {
@@ -3606,13 +2964,10 @@ unsafe extern "system" fn list_view_parent_subclass(
         WM_NOTIFY if lparam.0 != 0 => {
             let draw = &mut *(lparam.0 as *mut NMLVCUSTOMDRAW);
             let dark_flag = 1usize << (usize::BITS - 1);
-            let backdrop_flag = 1usize << (usize::BITS - 2);
-            let list = HWND((reference_data & !(dark_flag | backdrop_flag)) as *mut _);
+            let list = HWND((reference_data & !dark_flag) as *mut _);
             if draw.nmcd.hdr.hwndFrom == list && draw.nmcd.hdr.code == NM_CUSTOMDRAW {
                 let palette = palette_from_reference(
-                    (usize::from(reference_data & dark_flag != 0) * PALETTE_REFERENCE_DARK)
-                        | (usize::from(reference_data & backdrop_flag != 0)
-                            * PALETTE_REFERENCE_SYSTEM_BACKDROP),
+                    usize::from(reference_data & dark_flag != 0) * PALETTE_REFERENCE_DARK,
                 );
                 if draw.nmcd.dwDrawStage == CDDS_PREPAINT {
                     return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
@@ -3637,10 +2992,7 @@ unsafe extern "system" fn list_view_parent_subclass(
                     )
                     .0;
                     let selected = item_state & LVIS_SELECTED != 0;
-                    let alpha_composited = palette.uses_system_backdrop_surface() && !palette.dark;
-                    if (selected || alpha_composited)
-                        && paint_list_view_row(list, draw, palette, selected)
-                    {
+                    if selected && paint_list_view_row(list, draw, palette, true) {
                         // Windows 11's v6 ItemsView theme paints COLOR_HIGHLIGHT over clrTextBk
                         // after NM_CUSTOMDRAW.  Skip only that one selected row after reproducing
                         // its report-mode text layout; every unselected row remains native.
@@ -3914,7 +3266,6 @@ unsafe fn paint_list_view_checkboxes(hwnd: HWND, palette: Palette) {
             box_rect,
             embedded_button_glyph(palette.dark, dpi, control_state, checked),
             background,
-            None,
         );
     }
     let _ = windows::Win32::Graphics::Gdi::ReleaseDC(hwnd, dc);
@@ -4230,10 +3581,6 @@ fn scale(value: i32, dpi: u32) -> i32 {
 }
 
 unsafe fn fill(dc: windows::Win32::Graphics::Gdi::HDC, rect: &RECT, color: COLORREF) {
-    if color.0 != 0 {
-        fill_alpha_opaque_rect(dc, rect, color);
-        return;
-    }
     let brush = CreateSolidBrush(color);
     let _ = FillRect(dc, rect, brush);
     let _ = DeleteObject(brush);
@@ -4334,103 +3681,7 @@ mod tests {
     }
 
     #[test]
-    fn subclass_palette_reference_preserves_system_backdrop_surface() {
-        for base in [Palette::LIGHT, Palette::DARK] {
-            let normal = palette_from_reference(palette_reference(base));
-            assert_eq!(normal.dark, base.dark);
-            assert_eq!(normal.window, base.window);
-            assert_eq!(normal.nav, base.nav);
-            assert_eq!(normal.edit, base.edit);
-
-            let material = base.with_system_backdrop_surface();
-            let background = base.system_backdrop_edge_fallback();
-            let normal_surface = base.material_surface_visual(MaterialSurfaceState::Normal);
-            let hot_surface = base.material_surface_visual(MaterialSurfaceState::Hot);
-            let pressed_surface = base.material_surface_visual(MaterialSurfaceState::Pressed);
-            assert_eq!(
-                material.edit,
-                composite_color(normal_surface.fill, normal_surface.fill_alpha, background)
-            );
-            assert_eq!(material.button, material.edit);
-            assert_eq!(
-                material.button_hot,
-                composite_color(hot_surface.fill, hot_surface.fill_alpha, background)
-            );
-            assert_eq!(
-                material.button_pressed,
-                composite_color(pressed_surface.fill, pressed_surface.fill_alpha, background)
-            );
-            assert_eq!(
-                material.border,
-                composite_color(
-                    normal_surface.border,
-                    normal_surface.border_alpha,
-                    background
-                )
-            );
-            assert_eq!(material.separator, material.border);
-            assert_eq!(material.text, base.text);
-            let restored = palette_from_reference(palette_reference(material));
-            assert_eq!(restored.dark, base.dark);
-            assert_eq!(restored.window, COLORREF(0));
-            assert_eq!(restored.nav, COLORREF(0));
-            assert_eq!(restored.edit, material.edit);
-            assert_eq!(restored.button, material.button);
-            assert_eq!(restored.text, material.text);
-            assert_eq!(
-                material.system_backdrop_edge_fallback(),
-                if base.dark {
-                    rgb(32, 32, 32)
-                } else {
-                    rgb(243, 243, 243)
-                }
-            );
-            assert_eq!(material.control_border(), material.border);
-            assert_eq!(material.edit_brush_color(), material.edit);
-            assert_eq!(
-                material.foreground_black(),
-                if base.dark {
-                    rgb(1, 1, 1)
-                } else {
-                    rgb(24, 24, 24)
-                }
-            );
-        }
-        assert_eq!(Palette::LIGHT.foreground_black(), rgb(0, 0, 0));
-        assert_eq!(Palette::DARK.foreground_black(), rgb(0, 0, 0));
-    }
-
-    #[test]
-    fn material_controls_keep_theme_specific_depth_without_pure_white_surfaces() {
-        let dark = Palette::DARK.material_surface_visual(MaterialSurfaceState::Normal);
-        let light = Palette::LIGHT.material_surface_visual(MaterialSurfaceState::Normal);
-        assert!(dark.fill_alpha >= 170);
-        assert!(dark.border_alpha >= 100);
-        assert!(light.fill_alpha < dark.fill_alpha);
-        assert_ne!(light.fill, rgb(255, 255, 255));
-        assert!(light.border_alpha >= 60);
-    }
-
-    #[test]
-    fn native_edit_uses_the_parent_glass_key_without_a_binary_region() {
-        for base in [Palette::LIGHT, Palette::DARK] {
-            let material = base.with_system_backdrop_surface();
-            assert_eq!(rounded_control_exterior(material), COLORREF(0));
-            assert_eq!(rounded_control_exterior(base), base.window);
-        }
-    }
-
-    #[test]
-    fn native_edit_text_stays_visible_on_light_and_dark_material() {
-        let light = Palette::LIGHT.with_system_backdrop_surface();
-        let dark = Palette::DARK.with_system_backdrop_surface();
-        assert_eq!(light.edit_text_color(), rgb(24, 24, 24));
-        assert_eq!(light.edit_brush_color(), light.edit);
-        assert_eq!(dark.edit_text_color(), dark.text);
-    }
-
-    #[test]
-    fn light_material_combo_chevron_has_real_alpha_and_dark_rgb() {
+    fn light_combo_chevron_has_real_alpha_and_dark_rgb() {
         let color = Palette::LIGHT.text_secondary;
         let pixels = combo_chevron_pixels(8, 5, color);
         assert_eq!(pixels.len(), 8 * 5 * 4);
@@ -4455,26 +3706,6 @@ mod tests {
             other_styles
         );
         assert_eq!(edit_ex_style_without_layering(other_styles), other_styles);
-    }
-
-    #[test]
-    fn opaque_black_glyph_pixels_do_not_become_dwm_glass_holes() {
-        assert_eq!(
-            preserve_visible_black_on_system_backdrop(0, 255, 0, 0, 0),
-            (1, 1, 1)
-        );
-        assert_eq!(
-            preserve_visible_black_on_system_backdrop(0, 0, 0, 0, 0),
-            (0, 0, 0)
-        );
-        assert_eq!(
-            preserve_visible_black_on_system_backdrop(0, 255, 3, 4, 5),
-            (3, 4, 5)
-        );
-        assert_eq!(
-            preserve_visible_black_on_system_backdrop(rgb(249, 249, 249).0, 255, 0, 0, 0),
-            (0, 0, 0)
-        );
     }
 
     #[test]
@@ -4723,7 +3954,7 @@ mod tests {
         );
         // Keep the report's native non-client scrollbar in the supported dark Explorer family.
         // FlatSB colour overrides are unavailable in comctl32 v6 and ItemsView produces a bright
-        // white scrollbar trough on the dark Mica surface.
+        // white scrollbar trough on the dark page.
         assert_eq!(
             native_theme_class(NativeControlKind::Field, false),
             NativeThemeClass::Cfd
@@ -4754,19 +3985,6 @@ mod tests {
             assert_eq!(geometry.text.left, geometry.glyph.right + scale(5, dpi));
             assert_eq!(geometry.text.right, width);
         }
-    }
-
-    #[test]
-    fn light_material_checkbox_keeps_the_embedded_shape_but_not_black_corner_texels() {
-        assert_eq!(
-            checkbox_material_fallback(Palette::LIGHT.with_system_backdrop_surface()),
-            Some(rgb(243, 243, 243))
-        );
-        assert_eq!(
-            checkbox_material_fallback(Palette::DARK.with_system_backdrop_surface()),
-            Some(rgb(32, 32, 32))
-        );
-        assert_eq!(checkbox_material_fallback(Palette::LIGHT), None);
     }
 
     #[test]
@@ -4897,39 +4115,7 @@ mod tests {
     }
 
     #[test]
-    fn material_radio_glyph_keeps_the_rectangular_tile_fully_transparent() {
-        for base in [Palette::LIGHT, Palette::DARK] {
-            let palette = base.with_system_backdrop_surface();
-            for side in [13, 20, 26] {
-                for checked in [false, true] {
-                    let pixels = radio_glyph_bgra(side, palette, ControlState::default(), checked);
-                    let pixel = |x: i32, y: i32| {
-                        let offset = ((y * side + x) * 4) as usize;
-                        &pixels[offset..offset + 4]
-                    };
-                    for (x, y) in [(0, 0), (side - 1, 0), (0, side - 1), (side - 1, side - 1)] {
-                        assert_eq!(pixel(x, y), &[0, 0, 0, 0]);
-                    }
-                    assert_eq!(pixel(side / 2, side / 2)[3], 255);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn edit_mutation_messages_are_republished_before_returning_to_dwm() {
-        for message in [
-            0x000c, 0x00c2, 0x0102, 0x0109, 0x010f, 0x0300, 0x0302, 0x0303, 0x0304,
-        ] {
-            assert!(edit_message_may_change_visible_text(message, 0));
-        }
-        assert!(edit_message_may_change_visible_text(WM_KEYDOWN, 0x2e));
-        assert!(!edit_message_may_change_visible_text(WM_KEYDOWN, 0x25));
-        assert!(!edit_message_may_change_visible_text(WM_MOUSEMOVE, 0));
-    }
-
-    #[test]
-    fn list_view_trailing_material_fill_begins_after_the_final_row() {
+    fn list_view_trailing_fill_begins_after_the_final_row() {
         let client = RECT {
             left: 0,
             top: 0,

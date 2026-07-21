@@ -1,10 +1,6 @@
-use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::rc::Rc;
-use std::sync::Once;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{
@@ -20,9 +16,7 @@ use windows::Win32::Graphics::Gdi::{
     OBJ_FONT, OPAQUE, PEN_STYLE, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::UI::Controls::{
-    BeginBufferedPaint, BufferedPaintClear, BufferedPaintInit, CloseThemeData, DrawThemeTextEx,
-    EndBufferedPaint, OpenThemeData, SetWindowTheme, BPBF_TOPDOWNDIB, DRAWITEMSTRUCT, DTTOPTS,
-    DTT_COMPOSITED, DTT_TEXTCOLOR, ODA_FOCUS, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_SELECTED,
+    SetWindowTheme, DRAWITEMSTRUCT, ODA_FOCUS, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_SELECTED,
     WM_MOUSELEAVE,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -38,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE,
 };
 
-use super::theme::{MaterialSurfaceState, Palette};
+use super::theme::Palette;
 
 const BUTTON_HOT_PROPERTY: PCWSTR = w!("LetRecovery.InnoButton.Hot");
 const OWNER_DRAW_BUTTON_SUBCLASS_ID: usize = 0x4c52;
@@ -133,8 +127,6 @@ struct ButtonSurfaceVisual {
     fill: COLORREF,
     border: COLORREF,
     text: COLORREF,
-    fill_alpha: u8,
-    border_alpha: u8,
 }
 
 /// Resolves every button state explicitly. This avoids relying on the host Windows theme,
@@ -142,16 +134,7 @@ struct ButtonSurfaceVisual {
 pub fn button_visual(palette: Palette, role: ButtonRole, state: ControlState) -> ButtonVisual {
     if state.disabled {
         return ButtonVisual {
-            fill: if palette.window.0 == 0 && palette.nav.0 == 0 {
-                // Keep disabled material actions visibly blue-gray instead of collapsing into a
-                // flat neutral slab. Secondary buttons publish the alpha surface resolved below;
-                // disabled primary actions use this restrained opaque equivalent.
-                if palette.dark {
-                    rgb(60, 70, 92)
-                } else {
-                    rgb(226, 233, 242)
-                }
-            } else if palette.dark {
+            fill: if palette.dark {
                 rgb(47, 47, 47)
             } else {
                 rgb(249, 249, 249)
@@ -183,7 +166,7 @@ pub fn button_visual(palette: Palette, role: ButtonRole, state: ControlState) ->
             fill,
             border: palette.highlight_border,
             text: if palette.dark {
-                palette.foreground_black()
+                rgb(0, 0, 0)
             } else {
                 rgb(255, 255, 255)
             },
@@ -206,44 +189,16 @@ pub fn button_visual(palette: Palette, role: ButtonRole, state: ControlState) ->
     }
 }
 
-/// Uses the same material surface contract as fields and lists. Highlighted actions stay opaque;
-/// ordinary navigation and secondary buttons publish the overlay itself so wallpaper and
-/// active/inactive DWM material changes remain visible.
 fn button_surface_visual(
     palette: Palette,
     role: ButtonRole,
     state: ControlState,
 ) -> ButtonSurfaceVisual {
     let visual = button_visual(palette, role, state);
-    let material = palette.window.0 == 0 && palette.nav.0 == 0;
-    let highlighted = matches!(role, ButtonRole::Primary)
-        || matches!(role, ButtonRole::Navigation { selected: true });
-    if !material || highlighted {
-        return ButtonSurfaceVisual {
-            fill: visual.fill,
-            border: visual.border,
-            text: visual.text,
-            fill_alpha: 255,
-            border_alpha: 255,
-        };
-    }
-
-    let state = if state.disabled {
-        MaterialSurfaceState::Disabled
-    } else if state.pressed {
-        MaterialSurfaceState::Pressed
-    } else if state.hot {
-        MaterialSurfaceState::Hot
-    } else {
-        MaterialSurfaceState::Normal
-    };
-    let surface = palette.material_surface_visual(state);
     ButtonSurfaceVisual {
-        fill: surface.fill,
-        border: surface.border,
+        fill: visual.fill,
+        border: visual.border,
         text: visual.text,
-        fill_alpha: surface.fill_alpha,
-        border_alpha: surface.border_alpha,
     }
 }
 
@@ -382,28 +337,14 @@ unsafe fn draw_button_surface(
     background: COLORREF,
     font: HFONT,
 ) {
-    if background.0 == 0 {
-        if !try_fill_round_rect_material_gdi(
-            dc,
-            rect,
-            metrics.corner_radius,
-            visual.fill,
-            visual.border,
-            visual.fill_alpha,
-            visual.border_alpha,
-        ) {
-            fill_round_rect(dc, rect, metrics.corner_radius, visual.fill, visual.border);
-        }
-    } else {
-        fill_round_rect_antialiased(
-            dc,
-            rect,
-            metrics.corner_radius,
-            visual.fill,
-            visual.border,
-            background,
-        );
-    }
+    fill_round_rect_antialiased(
+        dc,
+        rect,
+        metrics.corner_radius,
+        visual.fill,
+        visual.border,
+        background,
+    );
 
     // Keep a single outline. Win32 assigns keyboard focus on mouse-down as well, so an
     // additional inset focus rectangle would make every clicked button look double framed.
@@ -416,129 +357,29 @@ unsafe fn draw_button_surface(
     let _ = SetTextColor(dc, visual.text);
     let old_font = SelectObject(dc, font);
     let mut text_rect = rect;
-    draw_alpha_composited_text(
-        hwnd,
+    draw_native_text(
         dc,
         &text,
         &mut text_rect,
         DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         visual.text,
-        background.0 == 0,
     );
     let _ = SelectObject(dc, old_font);
 }
 
-/// Draws GDI-compatible text with a deterministic premultiplied-alpha glyph mask when the
-/// destination is a fully extended DWM frame. Theme-provided `DTT_COMPOSITED` text is tuned for
-/// light/glowing glass captions and does not reliably honour a dark light-mode foreground. A white
-/// GDI mask recoloured into premultiplied BGRA keeps the requested palette colour exact while
-/// preserving native font selection, ellipsis and mnemonic layout.
-pub(crate) unsafe fn draw_alpha_composited_text(
-    _hwnd: HWND,
+/// Draws text with the selected native font, ellipsis and mnemonic layout.
+pub(crate) unsafe fn draw_native_text(
     dc: HDC,
     text: &[u16],
     rect: &mut RECT,
     flags: DRAW_TEXT_FORMAT,
     color: COLORREF,
-    composited: bool,
 ) {
-    if text.is_empty() {
-        return;
-    }
-    if !composited {
-        draw_text_fallback(dc, text, rect, flags, color);
-        return;
-    }
-
-    let width = (rect.right - rect.left).max(0);
-    let height = (rect.bottom - rect.top).max(0);
-    if width == 0 || height == 0 {
-        return;
-    }
-    let buffer_dc = CreateCompatibleDC(dc);
-    if buffer_dc.is_invalid() {
-        draw_text_fallback(dc, text, rect, flags, color);
-        return;
-    }
-    let bitmap_info = top_down_bgra_bitmap_info(width, height);
-    let mut bits = std::ptr::null_mut::<c_void>();
-    let Ok(bitmap) = CreateDIBSection(
-        buffer_dc,
-        &bitmap_info,
-        DIB_RGB_COLORS,
-        &mut bits,
-        HANDLE::default(),
-        0,
-    ) else {
-        let _ = DeleteDC(buffer_dc);
-        draw_text_fallback(dc, text, rect, flags, color);
-        return;
-    };
-    let old_bitmap = SelectObject(buffer_dc, bitmap);
-    let byte_len = width as usize * height as usize * 4;
-    std::ptr::write_bytes(bits, 0, byte_len);
-    let font = GetCurrentObject(dc, OBJ_FONT);
-    let old_font = (!font.is_invalid()).then(|| SelectObject(buffer_dc, font));
-    let _ = SetBkMode(buffer_dc, TRANSPARENT);
-    let _ = SetTextColor(buffer_dc, rgb(255, 255, 255));
-    let mut local_rect = RECT {
-        left: 0,
-        top: 0,
-        right: width,
-        bottom: height,
-    };
-    let mut mask_text = text.to_vec();
-    let _ = DrawTextW(buffer_dc, &mut mask_text, &mut local_rect, flags);
-
-    // CreateDIBSection exposes memory shared with GDI's batched drawing pipeline. Microsoft
-    // requires an explicit flush before the application reads or writes those bits. Without this
-    // barrier a real multi-row ListView can enter the next DrawTextW while the previous cell's DIB
-    // is being rewritten, corrupting USER32 state and raising c0000005 from a window callback.
-    let _ = GdiFlush();
-    let pixels = std::slice::from_raw_parts_mut(bits.cast::<u8>(), byte_len);
-    let red = color.0 & 0xff;
-    let green = (color.0 >> 8) & 0xff;
-    let blue = (color.0 >> 16) & 0xff;
-    for pixel in pixels.chunks_exact_mut(4) {
-        // A ClearType edge may light only one RGB subpixel. Promoting the maximum channel to the
-        // whole destination pixel makes regular Microsoft YaHei UI look artificially bold on a
-        // transparent material surface. Average the three channels so the original 400-weight
-        // stem coverage is retained after converting the mask to grayscale alpha.
-        let coverage = (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2]) + 1) / 3;
-        pixel[0] = ((blue * coverage + 127) / 255) as u8;
-        pixel[1] = ((green * coverage + 127) / 255) as u8;
-        pixel[2] = ((red * coverage + 127) / 255) as u8;
-        pixel[3] = coverage as u8;
-    }
-    let _ = AlphaBlend(
-        dc,
-        rect.left,
-        rect.top,
-        width,
-        height,
-        buffer_dc,
-        0,
-        0,
-        width,
-        height,
-        BLENDFUNCTION {
-            BlendOp: AC_SRC_OVER as u8,
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: AC_SRC_ALPHA as u8,
-        },
-    );
-    if let Some(old_font) = old_font {
-        let _ = SelectObject(buffer_dc, old_font);
-    }
-    let _ = SelectObject(buffer_dc, old_bitmap);
-    let _ = DeleteObject(bitmap);
-    let _ = DeleteDC(buffer_dc);
+    draw_text_fallback(dc, text, rect, flags, color);
 }
 
 /// Publishes an already premultiplied top-down BGRA surface over a classic child-window DC.
-/// Pixels with zero alpha leave the DWM glass key untouched, which is required for circular
-/// material glyphs whose bounding DIB is necessarily rectangular.
+/// Pixels with zero alpha preserve the destination around antialiased glyphs.
 pub(crate) unsafe fn alpha_blend_premultiplied_bgra(
     dc: HDC,
     x: i32,
@@ -697,67 +538,6 @@ unsafe fn draw_opaque_text_fallback(
     let _ = SetTextColor(dc, color);
     let mut native_text = text.to_vec();
     let _ = DrawTextW(dc, &mut native_text, rect, flags);
-}
-
-/// Draws a direct child label over a transparent DWM material surface. UxTheme's glass compositor
-/// preserves the material around the glyph without publishing an opaque STATIC bounding box.
-pub(crate) unsafe fn draw_backdrop_static_text(
-    hwnd: HWND,
-    dc: HDC,
-    text: &[u16],
-    rect: &mut RECT,
-    flags: DRAW_TEXT_FORMAT,
-    color: COLORREF,
-) {
-    if text.is_empty() {
-        return;
-    }
-    static BUFFERED_PAINT_INIT: Once = Once::new();
-    BUFFERED_PAINT_INIT.call_once(|| {
-        let _ = BufferedPaintInit();
-    });
-    let mut buffer_dc = HDC::default();
-    let buffer = BeginBufferedPaint(dc, rect, BPBF_TOPDOWNDIB, None, &mut buffer_dc);
-    if buffer == 0 || buffer_dc.is_invalid() {
-        draw_text_fallback(dc, text, rect, flags, color);
-        return;
-    }
-    let _ = BufferedPaintClear(buffer, None);
-    let font = GetCurrentObject(dc, OBJ_FONT);
-    let old_font = (!font.is_invalid()).then(|| SelectObject(buffer_dc, font));
-    let theme = OpenThemeData(hwnd, w!("CompositedWindow::Window"));
-    let options = DTTOPTS {
-        dwSize: std::mem::size_of::<DTTOPTS>() as u32,
-        dwFlags: DTT_COMPOSITED | DTT_TEXTCOLOR,
-        crText: color,
-        ..Default::default()
-    };
-    let drawn = !theme.is_invalid()
-        && DrawThemeTextEx(theme, buffer_dc, 0, 0, text, flags, rect, Some(&options)).is_ok();
-    if !theme.is_invalid() {
-        let _ = CloseThemeData(theme);
-    }
-    if !drawn {
-        draw_text_fallback(buffer_dc, text, rect, flags, color);
-    }
-    if let Some(old_font) = old_font {
-        let _ = SelectObject(buffer_dc, old_font);
-    }
-    let _ = EndBufferedPaint(buffer, true);
-}
-
-/// Nested content child windows flatten UxTheme's buffered alpha before it reaches the DWM-backed
-/// top-level dialog. Use the same deterministic premultiplied glyph mask as material buttons for
-/// those labels only; the untouched pixels remain transparent and expose the dialog Mica surface.
-pub(crate) unsafe fn draw_nested_backdrop_static_text(
-    hwnd: HWND,
-    dc: HDC,
-    text: &[u16],
-    rect: &mut RECT,
-    flags: DRAW_TEXT_FORMAT,
-    color: COLORREF,
-) {
-    draw_alpha_composited_text(hwnd, dc, text, rect, flags, color, true);
 }
 
 unsafe fn draw_text_fallback(
@@ -1012,14 +792,9 @@ unsafe fn try_fill_round_rect_antialiased(
     border: COLORREF,
     background: COLORREF,
 ) -> bool {
-    if background.0 != 0 {
-        return try_fill_round_rect_opaque_gdi(dc, rect, radius, fill, border, background);
-    }
-    try_fill_round_rect_material_gdi(dc, rect, radius, fill, border, 255, 255)
+    try_fill_round_rect_opaque_gdi(dc, rect, radius, fill, border, background)
 }
 
-/// This is the established pre-material button/control geometry. Keeping it as the opaque path
-/// prevents enabling or disabling the experimental backdrop from changing ordinary UI styling.
 unsafe fn try_fill_round_rect_opaque_gdi(
     dc: HDC,
     rect: RECT,
@@ -1075,183 +850,6 @@ unsafe fn try_fill_round_rect_opaque_gdi(
     let _ = DeleteObject(bitmap);
     let _ = DeleteDC(memory_dc);
     copied
-}
-
-/// Reuses the exact same 4x GDI `RoundRect` geometry as the opaque path, then converts only its
-/// sentinel exterior pixels to transparent premultiplied BGRA. The material changes composition,
-/// not the control's radius, stroke placement or palette.
-unsafe fn try_fill_round_rect_material_gdi(
-    dc: HDC,
-    rect: RECT,
-    radius: i32,
-    fill: COLORREF,
-    border: COLORREF,
-    fill_alpha: u8,
-    border_alpha: u8,
-) -> bool {
-    let width = (rect.right - rect.left).max(0);
-    let height = (rect.bottom - rect.top).max(0);
-    if width == 0 || height == 0 {
-        return false;
-    }
-    let key = MaterialRoundRectKey {
-        width,
-        height,
-        radius,
-        fill: fill.0,
-        border: border.0,
-        fill_alpha,
-        border_alpha,
-    };
-    let pixels = MATERIAL_ROUND_RECT_CACHE.with(|cache| {
-        cache
-            .borrow()
-            .iter()
-            .find_map(|(cached_key, pixels)| (*cached_key == key).then(|| Rc::clone(pixels)))
-    });
-    let pixels = if let Some(pixels) = pixels {
-        pixels
-    } else {
-        let Some(rendered) = render_material_round_rect_pixels(dc, key) else {
-            return false;
-        };
-        let rendered = Rc::new(rendered);
-        MATERIAL_ROUND_RECT_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() >= MATERIAL_ROUND_RECT_CACHE_LIMIT {
-                cache.pop_front();
-            }
-            cache.push_back((key, Rc::clone(&rendered)));
-        });
-        rendered
-    };
-
-    let info = top_down_bgra_bitmap_info(width, height);
-    let result = StretchDIBits(
-        dc,
-        rect.left,
-        rect.top,
-        width,
-        height,
-        0,
-        0,
-        width,
-        height,
-        Some(pixels.as_ptr().cast()),
-        &info,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
-    result != 0 && result != u32::MAX as i32
-}
-
-const MATERIAL_ROUND_RECT_CACHE_LIMIT: usize = 48;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct MaterialRoundRectKey {
-    width: i32,
-    height: i32,
-    radius: i32,
-    fill: u32,
-    border: u32,
-    fill_alpha: u8,
-    border_alpha: u8,
-}
-
-thread_local! {
-    static MATERIAL_ROUND_RECT_CACHE: RefCell<VecDeque<(MaterialRoundRectKey, Rc<Vec<u8>>)>> =
-        const { RefCell::new(VecDeque::new()) };
-}
-
-unsafe fn render_material_round_rect_pixels(dc: HDC, key: MaterialRoundRectKey) -> Option<Vec<u8>> {
-    const SCALE: i32 = 4;
-    const SENTINEL: COLORREF = rgb(251, 0, 253);
-    let width = key.width;
-    let height = key.height;
-    let high_width = width.saturating_mul(SCALE);
-    let high_height = height.saturating_mul(SCALE);
-    let memory_dc = CreateCompatibleDC(dc);
-    if memory_dc.is_invalid() {
-        return None;
-    }
-    let high_info = top_down_bgra_bitmap_info(high_width, high_height);
-    let mut bits = std::ptr::null_mut::<c_void>();
-    let Ok(bitmap) = CreateDIBSection(
-        memory_dc,
-        &high_info,
-        DIB_RGB_COLORS,
-        &mut bits,
-        HANDLE::default(),
-        0,
-    ) else {
-        let _ = DeleteDC(memory_dc);
-        return None;
-    };
-    let old_bitmap = SelectObject(memory_dc, bitmap);
-    let high_rect = RECT {
-        left: 0,
-        top: 0,
-        right: high_width,
-        bottom: high_height,
-    };
-    let sentinel_brush = CreateSolidBrush(SENTINEL);
-    let _ = FillRect(memory_dc, &high_rect, sentinel_brush);
-    let _ = DeleteObject(sentinel_brush);
-    let fill = COLORREF(key.fill);
-    let border = COLORREF(key.border);
-    draw_high_resolution_round_rect(memory_dc, high_rect, key.radius, fill, border, SCALE);
-    let _ = GdiFlush();
-
-    let high_len = high_width as usize * high_height as usize * 4;
-    let high_pixels = std::slice::from_raw_parts(bits.cast::<u8>(), high_len);
-    let sentinel = [
-        ((SENTINEL.0 >> 16) & 0xff) as u8,
-        ((SENTINEL.0 >> 8) & 0xff) as u8,
-        (SENTINEL.0 & 0xff) as u8,
-    ];
-    let border_bgr = [
-        ((border.0 >> 16) & 0xff) as u8,
-        ((border.0 >> 8) & 0xff) as u8,
-        (border.0 & 0xff) as u8,
-    ];
-    let sample_count = (SCALE * SCALE) as u32;
-    let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    for y in 0..height {
-        for x in 0..width {
-            let mut channels = [0u32; 3];
-            let mut alpha_sum = 0u32;
-            for sample_y in 0..SCALE {
-                for sample_x in 0..SCALE {
-                    let high_x = x * SCALE + sample_x;
-                    let high_y = y * SCALE + sample_y;
-                    let offset = ((high_y * high_width + high_x) * 4) as usize;
-                    let sample = &high_pixels[offset..offset + 4];
-                    if sample[..3] == sentinel {
-                        continue;
-                    }
-                    let alpha = u32::from(if sample[..3] == border_bgr {
-                        key.border_alpha
-                    } else {
-                        key.fill_alpha
-                    });
-                    channels[0] += u32::from(sample[0]) * alpha;
-                    channels[1] += u32::from(sample[1]) * alpha;
-                    channels[2] += u32::from(sample[2]) * alpha;
-                    alpha_sum += alpha;
-                }
-            }
-            let offset = ((y * width + x) * 4) as usize;
-            let channel_divisor = sample_count * 255;
-            pixels[offset] = ((channels[0] + channel_divisor / 2) / channel_divisor) as u8;
-            pixels[offset + 1] = ((channels[1] + channel_divisor / 2) / channel_divisor) as u8;
-            pixels[offset + 2] = ((channels[2] + channel_divisor / 2) / channel_divisor) as u8;
-            pixels[offset + 3] = ((alpha_sum + sample_count / 2) / sample_count) as u8;
-        }
-    }
-    let _ = SelectObject(memory_dc, old_bitmap);
-    let _ = DeleteObject(bitmap);
-    let _ = DeleteDC(memory_dc);
-    Some(pixels)
 }
 
 unsafe fn draw_high_resolution_round_rect(
@@ -1473,90 +1071,13 @@ unsafe fn paint_antialiased_frame_corner(
             let screen_x = origin.0 + if flip.0 { radius - 1 - x } else { x };
             let screen_y = origin.1 + if flip.1 { radius - 1 - y } else { y };
             let sample_count = (SAMPLES * SAMPLES) as u32;
-            if matches!(exterior, CornerExterior::Color(color) if color.0 == 0) {
-                paint_material_frame_corner_pixel(
-                    dc,
-                    (screen_x, screen_y),
-                    (interior, border),
-                    (inner, outer, sample_count),
-                );
-            } else if let Some(color) =
+            if let Some(color) =
                 deterministic_corner_color(interior, border, exterior, inner, outer, sample_count)
             {
                 let _ = windows::Win32::Graphics::Gdi::SetPixelV(dc, screen_x, screen_y, color);
             }
         }
     }
-}
-
-unsafe fn paint_material_frame_corner_pixel(
-    dc: HDC,
-    position: (i32, i32),
-    colors: (COLORREF, COLORREF),
-    samples: (u32, u32, u32),
-) {
-    let (x, y) = position;
-    let (interior, border) = colors;
-    let (inner_samples, outer_samples, sample_count) = samples;
-    let inner_samples = inner_samples.min(sample_count);
-    let outer_samples = outer_samples.clamp(inner_samples, sample_count);
-    if outer_samples == 0 {
-        // Preserve the parent's exact black DWM glass key instead of publishing a different
-        // zero-alpha child pixel at the fully exterior corner.
-        let _ = windows::Win32::Graphics::Gdi::SetPixelV(dc, x, y, COLORREF(0));
-        return;
-    }
-    if inner_samples == sample_count {
-        return;
-    }
-    let pixel = premultiplied_material_corner_pixel(
-        interior,
-        border,
-        inner_samples,
-        outer_samples,
-        sample_count,
-    );
-    let bitmap = top_down_bgra_bitmap_info(1, 1);
-    let _ = StretchDIBits(
-        dc,
-        x,
-        y,
-        1,
-        1,
-        0,
-        0,
-        1,
-        1,
-        Some(pixel.as_ptr().cast()),
-        &bitmap,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
-}
-
-fn premultiplied_material_corner_pixel(
-    interior: COLORREF,
-    border: COLORREF,
-    inner_samples: u32,
-    outer_samples: u32,
-    sample_count: u32,
-) -> [u8; 4] {
-    let sample_count = sample_count.max(1);
-    let inner_samples = inner_samples.min(sample_count);
-    let outer_samples = outer_samples.clamp(inner_samples, sample_count);
-    let border_samples = outer_samples - inner_samples;
-    let channel = |shift: u32| {
-        ((((interior.0 >> shift) & 0xff) * inner_samples
-            + ((border.0 >> shift) & 0xff) * border_samples
-            + sample_count / 2)
-            / sample_count) as u8
-    };
-    [
-        channel(16),
-        channel(8),
-        channel(0),
-        ((255 * outer_samples + sample_count / 2) / sample_count) as u8,
-    ]
 }
 
 /// Computes an absolute corner colour rather than blending with the pixel left by the previous
@@ -1646,57 +1167,9 @@ unsafe fn stroke_round_rect(dc: HDC, rect: RECT, radius: i32, color: COLORREF) {
 }
 
 unsafe fn fill_solid_rect(dc: HDC, rect: &RECT, color: COLORREF) {
-    if color.0 != 0 {
-        fill_alpha_opaque_rect(dc, rect, color);
-        return;
-    }
     let brush = CreateSolidBrush(color);
     let _ = FillRect(dc, rect, brush);
     let _ = DeleteObject(brush);
-}
-
-/// Writes a solid premultiplied BGRA pixel across a control surface. Unlike a GDI solid brush,
-/// this establishes alpha=255 before native text is drawn on a DWM glass client area.
-pub(crate) unsafe fn fill_alpha_opaque_rect(dc: HDC, rect: &RECT, color: COLORREF) {
-    let width = (rect.right - rect.left).max(0);
-    let height = (rect.bottom - rect.top).max(0);
-    if width == 0 || height == 0 {
-        return;
-    }
-    let pixel = [
-        ((color.0 >> 16) & 0xff) as u8,
-        ((color.0 >> 8) & 0xff) as u8,
-        (color.0 & 0xff) as u8,
-        255,
-    ];
-    let bitmap = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: 1,
-            biHeight: -1,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            biSizeImage: 4,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let _ = StretchDIBits(
-        dc,
-        rect.left,
-        rect.top,
-        width,
-        height,
-        0,
-        0,
-        1,
-        1,
-        Some(pixel.as_ptr().cast()),
-        &bitmap,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
 }
 
 unsafe fn stroke_rect(dc: HDC, rect: RECT, color: COLORREF) {
@@ -2335,28 +1808,6 @@ mod tests {
     }
 
     #[test]
-    fn material_corner_pixels_keep_border_rgb_and_alpha_coverage_consistent() {
-        let interior = rgb(24, 27, 33);
-        let border = rgb(52, 57, 67);
-        assert_eq!(
-            premultiplied_material_corner_pixel(interior, border, 0, 16, 16),
-            [67, 57, 52, 255]
-        );
-        assert_eq!(
-            premultiplied_material_corner_pixel(interior, border, 0, 8, 16),
-            [34, 29, 26, 128]
-        );
-        assert_eq!(
-            premultiplied_material_corner_pixel(interior, border, 4, 12, 16),
-            [42, 35, 32, 191]
-        );
-        assert_eq!(
-            premultiplied_material_corner_pixel(interior, border, 0, 0, 16),
-            [0, 0, 0, 0]
-        );
-    }
-
-    #[test]
     fn edit_uses_shared_single_line_frame_but_keeps_multiline_report_border() {
         const WS_EX_CLIENTEDGE_VALUE: u32 = 0x0000_0200;
         let (single_ex, single) = child_styles(true, false, 0);
@@ -2490,38 +1941,6 @@ mod tests {
     }
 
     #[test]
-    fn material_secondary_buttons_reveal_mica_but_highlighted_actions_stay_opaque() {
-        let material = Palette::DARK.with_system_backdrop_surface();
-        let normal =
-            button_surface_visual(material, ButtonRole::Secondary, ControlState::default());
-        let expected = Palette::DARK.material_surface_visual(MaterialSurfaceState::Normal);
-        assert_eq!(normal.fill, expected.fill);
-        assert_eq!(normal.border, expected.border);
-        assert_eq!(normal.fill_alpha, expected.fill_alpha);
-        assert_eq!(normal.border_alpha, expected.border_alpha);
-        assert!((170..255).contains(&normal.fill_alpha));
-
-        let hot = button_surface_visual(
-            material,
-            ButtonRole::Secondary,
-            ControlState {
-                hot: true,
-                ..ControlState::default()
-            },
-        );
-        assert!(hot.fill_alpha > normal.fill_alpha);
-
-        let primary = button_surface_visual(material, ButtonRole::Primary, ControlState::default());
-        assert_eq!(primary.fill, material.highlight_fill);
-        assert_eq!(primary.fill_alpha, 255);
-        assert_eq!(primary.border_alpha, 255);
-
-        // Resolving the current overlay against the documented dark Mica neutral keeps the
-        // original cool blue-grey depth without collapsing into an opaque solid button.
-        assert_eq!(material.button, rgb(60, 72, 94));
-    }
-
-    #[test]
     fn ordinary_opaque_theme_buttons_keep_the_existing_palette_and_full_alpha() {
         let expected = button_visual(
             Palette::DARK,
@@ -2536,8 +1955,6 @@ mod tests {
         assert_eq!(surface.fill, expected.fill);
         assert_eq!(surface.border, expected.border);
         assert_eq!(surface.text, expected.text);
-        assert_eq!(surface.fill_alpha, 255);
-        assert_eq!(surface.border_alpha, 255);
     }
 
     #[test]

@@ -8,11 +8,10 @@ use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, REC
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
-    GetMonitorInfoW, GetStockObject, InvalidateRect, LineTo, MonitorFromWindow, MoveToEx,
-    RedrawWindow, SelectObject, SetBkColor, SetBkMode, SetTextColor, BLACK_BRUSH, DT_END_ELLIPSIS,
-    DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC, HFONT, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, PEN_STYLE, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME,
-    RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
+    GetMonitorInfoW, InvalidateRect, LineTo, MonitorFromWindow, MoveToEx, RedrawWindow,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE,
+    DT_VCENTER, HBRUSH, HDC, HFONT, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, PEN_STYLE,
+    RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
@@ -43,13 +42,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WINDOW_EX_STYLE, WINDOW_STYLE, WM_CANCELMODE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
     WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DEVICECHANGE,
     WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_HSCROLL, WM_MOUSEWHEEL,
-    WM_NCACTIVATE, WM_NCCREATE, WM_NOTIFY, WM_PAINT, WM_SETFONT, WM_SETICON, WM_SETTINGCHANGE,
-    WM_SIZE, WM_SYSCOLORCHANGE, WM_THEMECHANGED, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_CHILD,
+    WM_NCCREATE, WM_NOTIFY, WM_PAINT, WM_SETFONT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
+    WM_SYSCOLORCHANGE, WM_THEMECHANGED, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_CHILD,
     WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_CONTROLPARENT, WS_EX_LAYERED, WS_OVERLAPPEDWINDOW,
     WS_TABSTOP, WS_VISIBLE,
 };
 
-use super::backdrop;
 use super::controls::{center_single_line_edit_in_row, child, draw_inno_button, wide, ButtonRole};
 use super::dialog::{DialogButtons, DialogResult, DialogShell, DialogSpec};
 use super::driver_transfer_dialog::NativeDriverTransferDialog;
@@ -139,9 +137,6 @@ use crate::PreloadedConfig;
 const CLASS_NAME: PCWSTR = w!("LetRecovery.Native.MainWindow");
 const SS_CENTER_STYLE: i32 = 0x0000_0001;
 
-unsafe fn system_backdrop_surface_brush() -> HBRUSH {
-    HBRUSH(GetStockObject(BLACK_BRUSH).0)
-}
 // Keeps the longest English navigation caption readable at 100-200% DPI without leaving an
 // oversized empty rail beside the centred button captions.
 const NAV_WIDTH: i32 = 168;
@@ -1449,8 +1444,6 @@ struct NativeWindow {
     font_brand: HFONT,
     palette: theme::Palette,
     brushes: Brushes,
-    backdrop_active: bool,
-    window_active: bool,
     handles: Option<Handles>,
     app_config: crate::core::app_config::AppConfig,
     is_pe_environment: bool,
@@ -1630,8 +1623,6 @@ impl NativeWindow {
             font_brand: HFONT::default(),
             palette,
             brushes: Brushes::new(palette),
-            backdrop_active: false,
-            window_active: false,
             handles: None,
             app_config,
             is_pe_environment,
@@ -2670,11 +2661,7 @@ impl NativeWindow {
             size_of::<i32>() as u32,
         );
 
-        self.apply_experimental_window_backdrop(hwnd);
         let control_palette = self.control_palette();
-        // Backdrop activation changes the field/button palette. Rebuild the GDI brushes only
-        // after DWM has accepted or rejected the request; retaining creation-time brushes caused
-        // edit/list surfaces and their text colours to come from different palettes.
         self.brushes = Brushes::new(control_palette);
 
         let Some(h) = self.handles else { return };
@@ -2779,41 +2766,10 @@ impl NativeWindow {
         if let Some(page) = &self.about_page {
             page.apply_theme(control_palette);
         }
-        // Plain STATIC captions do not pass through page-specific theme helpers. Install the
-        // alpha-aware glass painter across the complete main-window descendant tree only after
-        // every page has applied its native class and material palette.
-        theme::apply_backdrop_composition_to_descendants(hwnd, control_palette);
     }
 
     fn control_palette(&self) -> theme::Palette {
-        if self.uses_system_backdrop_surface() {
-            self.palette.with_system_backdrop_surface()
-        } else {
-            self.palette
-        }
-    }
-
-    fn uses_system_backdrop_surface(&self) -> bool {
-        backdrop::controls_use_mica(self.backdrop_active, self.window_active)
-    }
-
-    unsafe fn apply_experimental_window_backdrop(&mut self, hwnd: HWND) {
-        // The normal executable can be used as a diagnostic fallback in reduced environments.
-        // Never request a DWM material from WinPE even if a desktop config.json was copied in.
-        let endpoint_supports_mica = !crate::core::disk::DiskManager::is_pe_environment();
-        let enabled = backdrop::mica_session_enabled(
-            backdrop::ENABLE_EXPERIMENTAL_MICA,
-            endpoint_supports_mica,
-        );
-        match backdrop::apply_mica(hwnd, enabled, self.window_active) {
-            Ok(active) => self.backdrop_active = active,
-            Err(error) => {
-                self.backdrop_active = false;
-                if enabled {
-                    log::warn!("实验性 Mica 不可用，已回退为普通背景: {error}");
-                }
-            }
-        }
+        self.palette
     }
 
     unsafe fn refresh_system_theme(&mut self, hwnd: HWND) {
@@ -2825,21 +2781,6 @@ impl NativeWindow {
         self.palette = palette;
         self.apply_native_dark_theme(hwnd);
         redraw::resume(hwnd, redraw);
-    }
-
-    unsafe fn refresh_window_activation(&mut self, hwnd: HWND, active: bool) {
-        if self.window_active == active {
-            return;
-        }
-        self.window_active = active;
-        // Change the top-level DWM state once, then publish the existing children as one tree.
-        // The former suspend/resume path restored separately redirected child HWNDs sequentially.
-        self.apply_experimental_window_backdrop(hwnd);
-        let control_palette = self.control_palette();
-        self.brushes = Brushes::new(control_palette);
-        theme::refresh_material_palette_to_descendants(hwnd, control_palette);
-        redraw::publish_existing_tree(hwnd);
-        backdrop::flush_composition();
     }
 
     unsafe fn populate_partitions(&self, list: HWND, add_columns: bool) {
@@ -10057,15 +9998,6 @@ unsafe extern "system" fn window_proc(
             }
             LRESULT(0)
         }
-        WM_NCACTIVATE => {
-            let result = DefWindowProcW(hwnd, message, wparam, lparam);
-            if let Some(state) = state {
-                // Let DWM commit its native active/inactive Mica state first, then publish the
-                // already-existing child tree once with the matching control palette.
-                state.refresh_window_activation(hwnd, wparam.0 != 0);
-            }
-            result
-        }
         WM_SIZE => {
             if let Some(state) = state {
                 state.layout(hwnd);
@@ -10961,21 +10893,9 @@ unsafe extern "system" fn window_proc(
                     return LRESULT(brush.0 as isize);
                 }
                 let _ = SetTextColor(dc, state.control_palette().text);
-                let _ = SetBkColor(
-                    dc,
-                    if state.uses_system_backdrop_surface() {
-                        COLORREF(0)
-                    } else {
-                        state.palette.window
-                    },
-                );
+                let _ = SetBkColor(dc, state.palette.window);
                 let _ = SetBkMode(dc, TRANSPARENT);
-                let brush = if state.uses_system_backdrop_surface() {
-                    system_backdrop_surface_brush()
-                } else {
-                    state.brushes.window
-                };
-                return LRESULT(brush.0 as isize);
+                return LRESULT(state.brushes.window.0 as isize);
             }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
@@ -10983,21 +10903,9 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state {
                 let dc = HDC(wparam.0 as *mut _);
                 let _ = SetTextColor(dc, state.control_palette().text);
-                let _ = SetBkColor(
-                    dc,
-                    if state.uses_system_backdrop_surface() {
-                        COLORREF(0)
-                    } else {
-                        state.palette.window
-                    },
-                );
+                let _ = SetBkColor(dc, state.palette.window);
                 let _ = SetBkMode(dc, TRANSPARENT);
-                let brush = if state.uses_system_backdrop_surface() {
-                    system_backdrop_surface_brush()
-                } else {
-                    state.brushes.window
-                };
-                return LRESULT(brush.0 as isize);
+                return LRESULT(state.brushes.window.0 as isize);
             }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
@@ -11008,12 +10916,7 @@ unsafe extern "system" fn window_proc(
                 let dc = BeginPaint(hwnd, &mut paint);
                 let mut rect = RECT::default();
                 let _ = GetClientRect(hwnd, &mut rect);
-                let surface = if state.uses_system_backdrop_surface() {
-                    system_backdrop_surface_brush()
-                } else {
-                    state.brushes.window
-                };
-                let _ = FillRect(dc, &rect, surface);
+                let _ = FillRect(dc, &rect, state.brushes.window);
                 // Long tasks intentionally occupy the complete client area.  Painting the normal
                 // navigation rail underneath their transparent STATIC controls leaked the old
                 // navigation separator through as several disconnected vertical strokes.
@@ -11024,18 +10927,14 @@ unsafe extern "system" fn window_proc(
                         right: state.scale(NAV_WIDTH),
                         bottom: rect.bottom - state.scale(COMMAND_HEIGHT),
                     };
-                    if !state.uses_system_backdrop_surface() {
-                        let _ = FillRect(dc, &nav_rect, state.brushes.nav);
-                    }
+                    let _ = FillRect(dc, &nav_rect, state.brushes.nav);
                     let footer_rect = RECT {
                         left: 0,
                         top: rect.bottom - state.scale(COMMAND_HEIGHT),
                         right: rect.right,
                         bottom: rect.bottom,
                     };
-                    if !state.uses_system_backdrop_surface() {
-                        let _ = FillRect(dc, &footer_rect, state.brushes.window);
-                    }
+                    let _ = FillRect(dc, &footer_rect, state.brushes.window);
                     draw_line(
                         dc,
                         state.scale(NAV_WIDTH),

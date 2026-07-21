@@ -3,7 +3,6 @@
 //! This module owns only presentation and user intent. Destructive operations remain in the
 //! existing typed Rust core and are never executed from a window procedure.
 
-mod backdrop;
 mod controls;
 pub mod dialog;
 pub mod driver_transfer_dialog;

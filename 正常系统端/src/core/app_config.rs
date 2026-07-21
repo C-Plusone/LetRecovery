@@ -379,14 +379,4 @@ mod tests {
         assert!(advanced_options_allowed(true, false));
         assert!(!advanced_options_allowed(false, false));
     }
-
-    #[test]
-    fn retired_backdrop_config_is_ignored_without_breaking_old_files() {
-        let config: AppConfig =
-            serde_json::from_str(r#"{"experimental_window_backdrop":"mica","language":"en-US"}"#)
-                .unwrap();
-        assert_eq!(config.language, "en-US");
-        let serialized = serde_json::to_string(&config).unwrap();
-        assert!(!serialized.contains("experimental_window_backdrop"));
-    }
 }

@@ -18,35 +18,31 @@ use windows::Win32::Graphics::Gdi::{
     RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{SetWindowTheme, DRAWITEMSTRUCT, HDITEMW, HDI_TEXT, ODT_HEADER};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetActiveWindow, SetFocus, VK_ESCAPE,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumChildWindows,
-    EnumThreadWindows, GetClassNameW, GetClientRect, GetMessageW, GetParent, GetWindowLongPtrW,
-    GetWindowRect, IsDialogMessageW, IsWindow, IsWindowVisible, LoadCursorW, MoveWindow,
-    RegisterClassExW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, TranslateMessage, BN_CLICKED, BS_OWNERDRAW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
+    GetClassNameW, GetClientRect, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
+    IsDialogMessageW, IsWindow, IsWindowVisible, LoadCursorW, MoveWindow, RegisterClassExW,
+    SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    TranslateMessage, BN_CLICKED, BS_OWNERDRAW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
     GWLP_USERDATA, HMENU, ICON_BIG, ICON_SMALL, IDC_ARROW, MSG, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE,
     WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DPICHANGED,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_GETFONT, WM_HSCROLL, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCREATE,
-    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_SETFONT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
-    WM_SYSCOLORCHANGE, WM_THEMECHANGED, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
-    WS_CLIPSIBLINGS, WS_EX_CONTROLPARENT, WS_EX_DLGMODALFRAME, WS_OVERLAPPED, WS_SYSMENU,
-    WS_TABSTOP, WS_VISIBLE,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETFONT, WM_HSCROLL, WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY,
+    WM_NOTIFY, WM_PAINT, WM_SETFONT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCOLORCHANGE,
+    WM_THEMECHANGED, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_EX_CONTROLPARENT, WS_EX_DLGMODALFRAME, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 
 use super::controls::{child, draw_inno_button, wide, ButtonRole, InnoMetrics};
 use super::layout::{measure_text, LayoutMetrics};
+use super::redraw;
 use super::theme::{
     apply_control_theme, apply_list_view_theme, apply_progress_theme, apply_trackbar_theme,
-    refresh_material_palette_to_descendants, Brushes, NativeControlKind, Palette,
+    Brushes, NativeControlKind, Palette,
 };
-use super::{backdrop, redraw};
 
 const DIALOG_CLASS: PCWSTR = w!("LetRecovery.Native.InnoDialog");
 const CONTENT_CLASS: PCWSTR = w!("LetRecovery.Native.InnoDialogContent");
@@ -242,8 +238,6 @@ struct DialogState {
     dpi: u32,
     palette: Palette,
     brushes: Brushes,
-    backdrop_active: bool,
-    window_active: bool,
     font: HFONT,
     heading_font: HFONT,
     labels: [String; 5],
@@ -261,8 +255,6 @@ impl DialogState {
             dpi: 96,
             palette,
             brushes: Brushes::new(palette),
-            backdrop_active: false,
-            window_active: false,
             font: HFONT::default(),
             heading_font: HFONT::default(),
             labels: [
@@ -280,7 +272,7 @@ impl DialogState {
 
     unsafe fn create_children(&mut self, hwnd: HWND) -> windows::core::Result<()> {
         self.dpi = GetDpiForWindow(hwnd).max(96);
-        self.refresh_palette_and_backdrop();
+        self.refresh_palette();
         self.create_fonts();
         let title = child(hwnd, w!("STATIC"), &self.labels[0], 0, ID_TITLE)?;
         let description = child(hwnd, w!("STATIC"), &self.labels[1], 0, ID_DESCRIPTION)?;
@@ -320,39 +312,9 @@ impl DialogState {
         Ok(())
     }
 
-    unsafe fn refresh_palette_and_backdrop(&mut self) {
-        let base = Palette::system();
-        let endpoint_supports_mica = !crate::core::disk::DiskManager::is_pe_environment();
-        let enabled = backdrop::mica_session_enabled(
-            backdrop::ENABLE_EXPERIMENTAL_MICA,
-            endpoint_supports_mica,
-        );
-        self.backdrop_active = match backdrop::apply_mica(self.hwnd, enabled, self.window_active) {
-            Ok(active) => active,
-            Err(error) => {
-                if enabled {
-                    log::warn!("工具窗口 Mica 不可用，已回退为普通背景: {error}");
-                }
-                false
-            }
-        };
-        self.palette = if backdrop::controls_use_mica(self.backdrop_active, self.window_active) {
-            base.with_system_backdrop_surface()
-        } else {
-            base
-        };
+    unsafe fn refresh_palette(&mut self) {
+        self.palette = Palette::system();
         self.brushes = Brushes::new(self.palette);
-    }
-
-    unsafe fn refresh_window_activation(&mut self, active: bool) {
-        if self.window_active == active {
-            return;
-        }
-        self.window_active = active;
-        self.refresh_palette_and_backdrop();
-        refresh_material_palette_to_descendants(self.hwnd, self.palette);
-        redraw::publish_existing_tree(self.hwnd);
-        backdrop::flush_composition();
     }
 
     unsafe fn create_fonts(&mut self) {
@@ -646,9 +608,7 @@ impl DialogShell {
             .map_or(HWND::default(), |h| h.content)
     }
 
-    /// Returns the palette already resolved against the shell's actual DWM material state.
-    /// Tool-specific controls created after the shell must use this instead of recomputing the
-    /// ordinary system palette and accidentally replacing Mica-safe text or field colors.
+    /// Returns the shell palette so tool-specific controls use the same light/dark colors.
     pub fn palette(&self) -> Palette {
         self.state.palette
     }
@@ -672,24 +632,12 @@ impl DialogShell {
         if self.state.result.is_some() {
             return;
         }
-        let opening_hidden = !IsWindowVisible(self.state.hwnd).as_bool();
-        if opening_hidden {
-            // A newly-created tool is about to become the active foreground window. Resolve its
-            // requested material while it is still hidden, otherwise its descendants are prepared
-            // with the inactive solid palette and only acquire Mica after the first focus cycle.
-            self.state.window_active = true;
-            self.state.refresh_palette_and_backdrop();
-        }
         // Tool-specific controls are created after the shell. Prepare every descendant while the
         // top-level window is still hidden, so USER32 never exposes the common-control defaults
         // (white empty ListView bodies, black header/check text, or the default GUI font).
         prepare_dialog_descendants(&self.state);
         let first_visible_frame = self.state.first_presentation_pending;
         let _ = ShowWindow(self.state.hwnd, SW_SHOW);
-        // SW_SHOW may be denied activation by the foreground lock or by a modal owner. Correct the
-        // optimistic hidden-state palette synchronously before publishing the complete tree.
-        let actually_active = GetActiveWindow() == self.state.hwnd;
-        self.state.refresh_window_activation(actually_active);
         if first_visible_frame {
             // Paint the complete dialog once before the owner starts its asynchronous inventory.
             // Otherwise USER32 can expose unpainted white ListView/button child surfaces until
@@ -759,28 +707,6 @@ unsafe fn prepare_dialog_descendants(state: &DialogState) {
         Some(prepare_dialog_descendant),
         LPARAM((&context as *const DialogDescendantTheme) as isize),
     );
-    super::theme::apply_backdrop_composition_to_descendants(state.hwnd, state.palette);
-}
-
-/// Reapplies the persisted Mica setting to every open reusable tool shell on the UI thread.
-pub(crate) unsafe fn refresh_open_dialog_backdrops() {
-    let _ = EnumThreadWindows(
-        GetCurrentThreadId(),
-        Some(refresh_dialog_backdrop),
-        LPARAM(0),
-    );
-}
-
-unsafe extern "system" fn refresh_dialog_backdrop(hwnd: HWND, _lparam: LPARAM) -> BOOL {
-    let mut class_name = [0u16; 64];
-    let length = GetClassNameW(hwnd, &mut class_name);
-    if length > 0
-        && String::from_utf16_lossy(&class_name[..length as usize])
-            .eq_ignore_ascii_case("LetRecovery.Native.InnoDialog")
-    {
-        let _ = SendMessageW(hwnd, WM_SETTINGCHANGE, WPARAM(0), LPARAM(0));
-    }
-    BOOL(1)
 }
 
 unsafe extern "system" fn prepare_dialog_descendant(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -905,13 +831,6 @@ unsafe extern "system" fn dialog_proc(
                 LRESULT(0)
             }
         }
-        WM_NCACTIVATE => {
-            let result = DefWindowProcW(hwnd, message, wparam, lparam);
-            if let Some(state) = state {
-                state.refresh_window_activation(wparam.0 != 0);
-            }
-            result
-        }
         WM_SIZE => {
             if let Some(state) = state {
                 state.layout();
@@ -956,7 +875,7 @@ unsafe extern "system" fn dialog_proc(
                 // dialog while replacing brushes and descendant theme classes so a modeless tool
                 // never shows half of each palette during an online system-theme switch.
                 let redraw = redraw::suspend(hwnd);
-                state.refresh_palette_and_backdrop();
+                state.refresh_palette();
                 state.apply_theme();
                 // Reapplying an existing subclass updates its palette reference data. Walk every
                 // live descendant in the same frozen frame so fields, ComboLBox popups, reports,
@@ -1007,14 +926,7 @@ unsafe extern "system" fn dialog_proc(
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(state) = state {
                 let dc = HDC(wparam.0 as *mut _);
-                let _ = SetTextColor(
-                    dc,
-                    if state.palette.dark {
-                        state.palette.text
-                    } else {
-                        state.palette.foreground_black()
-                    },
-                );
+                let _ = SetTextColor(dc, state.palette.text);
                 let _ = SetBkColor(dc, state.palette.window);
                 let _ = SetBkMode(dc, TRANSPARENT);
                 return LRESULT(state.brushes.window.0 as isize);
