@@ -1,5 +1,11 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    // BUILD_VERSION is derived from the build date.  Keep the build script tied to the actual
+    // application inputs instead of only the icon/theme assets; otherwise Cargo can reuse a
+    // weeks-old script output after Rust sources changed and the About page reports that stale
+    // date for a newly compiled executable.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=assets/icon.png");
     println!("cargo:rerun-if-changed=assets/win11_button_theme");
 

@@ -1597,7 +1597,63 @@ unsafe fn paint_list_view_frame(frame: HWND, palette: Palette) {
         palette.control_border(),
         rounded_control_exterior(palette),
     );
+    let mut header_window = RECT::default();
+    if GetWindowRect(header, &mut header_window).is_ok() {
+        if let Some(header_band) =
+            list_view_frame_header_band(window, header_window, width, height, geometry.arc_band)
+        {
+            // The sibling's hollow region is two or more pixels wide at scaled DPI. Painting
+            // that entire region with the report body colour and then adding a vertical outline
+            // leaves a dark rail on both sides of the independently painted header. Publish the
+            // header surface through the same clipped overlay after the outline instead: only the
+            // overlay's side strips are touched, while the fixed upper rounded arc remains above
+            // `header_band.top` and scrolling still cannot copy frame pixels into the report.
+            fill(dc, &header_band, palette.button);
+            for side_border in list_view_frame_header_side_borders(header_band, geometry.side_band)
+            {
+                fill(dc, &side_border, palette.control_border());
+            }
+        }
+    }
     let _ = ReleaseDC(frame, dc);
+}
+
+fn list_view_frame_header_band(
+    frame_window: RECT,
+    header_window: RECT,
+    frame_width: i32,
+    frame_height: i32,
+    arc_band: i32,
+) -> Option<RECT> {
+    if frame_width <= 0 || frame_height <= 0 {
+        return None;
+    }
+    let top = (header_window.top - frame_window.top)
+        .max(arc_band.max(0))
+        .clamp(0, frame_height);
+    let bottom = (header_window.bottom - frame_window.top).clamp(0, frame_height);
+    (bottom > top).then_some(RECT {
+        left: 0,
+        top,
+        right: frame_width,
+        bottom,
+    })
+}
+
+fn list_view_frame_header_side_borders(header_band: RECT, side_band: i32) -> [RECT; 2] {
+    let side = side_band
+        .max(1)
+        .min((header_band.right - header_band.left).max(1));
+    [
+        RECT {
+            right: header_band.left + side,
+            ..header_band
+        },
+        RECT {
+            left: header_band.right - side,
+            ..header_band
+        },
+    ]
 }
 
 unsafe extern "system" fn list_view_subclass(
@@ -3929,6 +3985,75 @@ mod tests {
         for message in [WM_SETTEXT, WM_ENABLE, WM_SIZE, WM_PAINT] {
             assert!(!native_scrollbar_may_repaint_frame(message));
         }
+    }
+
+    #[test]
+    fn list_view_header_surface_replaces_only_the_straight_side_rails() {
+        let frame = RECT {
+            left: 30,
+            top: 31,
+            right: 974,
+            bottom: 260,
+        };
+        let header = RECT {
+            left: 33,
+            top: 34,
+            right: 970,
+            bottom: 63,
+        };
+        let band = list_view_frame_header_band(frame, header, 944, 229, 6);
+        assert_eq!(
+            band,
+            Some(RECT {
+                left: 0,
+                top: 6,
+                right: 944,
+                bottom: 32,
+            })
+        );
+        assert_eq!(
+            list_view_frame_header_side_borders(band.unwrap(), 2),
+            [
+                RECT {
+                    left: 0,
+                    top: 6,
+                    right: 2,
+                    bottom: 32,
+                },
+                RECT {
+                    left: 942,
+                    top: 6,
+                    right: 944,
+                    bottom: 32,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn list_view_header_surface_fails_closed_outside_the_frame() {
+        let frame = RECT {
+            left: 100,
+            top: 100,
+            right: 900,
+            bottom: 340,
+        };
+        assert_eq!(
+            list_view_frame_header_band(
+                frame,
+                RECT {
+                    left: 101,
+                    top: 102,
+                    right: 899,
+                    bottom: 105,
+                },
+                800,
+                240,
+                6,
+            ),
+            None
+        );
+        assert_eq!(list_view_frame_header_band(frame, frame, 0, 240, 6), None);
     }
 
     #[test]

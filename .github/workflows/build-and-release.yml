@@ -166,6 +166,57 @@ jobs:
             fi
           done
 
+      - name: Validate and synchronize release language catalogs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $codes = @("en-US", "ja-JP", "ko-KR", "fr-FR", "de-DE")
+          $catalogs = @{}
+          foreach ($code in $codes) {
+            $path = Join-Path "assets\release\lang" "$code.json"
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "缺少发布语言文件: $path"
+            }
+            $catalog = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+            if (-not $catalog.language -or -not $catalog.author -or -not $catalog.data) {
+              throw "语言文件结构无效: $path"
+            }
+            $catalogs[$code] = $catalog
+          }
+          $referenceKeys = @($catalogs["en-US"].data.Keys | Sort-Object)
+          foreach ($code in $codes) {
+            $keys = @($catalogs[$code].data.Keys | Sort-Object)
+            if ($keys.Count -ne $referenceKeys.Count -or
+                (Compare-Object -ReferenceObject $referenceKeys -DifferenceObject $keys)) {
+              throw "语言文件键集合与 en-US 不一致: $code"
+            }
+            foreach ($key in $referenceKeys) {
+              $translated = [string]$catalogs[$code].data[$key]
+              if ([string]::IsNullOrWhiteSpace($translated)) {
+                throw "语言文件包含空译文: $code / $key"
+              }
+              $referencePlaceholders = @(
+                [regex]::Matches([string]$catalogs["en-US"].data[$key], '\{[^{}]*\}') |
+                  ForEach-Object { $_.Value }
+              )
+              $translatedPlaceholders = @(
+                [regex]::Matches($translated, '\{[^{}]*\}') |
+                  ForEach-Object { $_.Value }
+              )
+              if (Compare-Object -ReferenceObject $referencePlaceholders `
+                  -DifferenceObject $translatedPlaceholders) {
+                throw "语言文件格式占位符与 en-US 不一致: $code / $key"
+              }
+            }
+          }
+          $destination = "pkg\bin\lang"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          foreach ($code in $codes) {
+            Copy-Item -LiteralPath (Join-Path "assets\release\lang" "$code.json") `
+              -Destination (Join-Path $destination "$code.json") -Force
+          }
+          Write-Host "Validated and synchronized $($codes.Count) release language catalogs."
+
       - name: Replace system-side exe
         shell: bash
         run: |
@@ -208,6 +259,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $pcaDestination | Out-Null
           Copy-Item -Path (Join-Path $pcaSource "*") -Destination $pcaDestination -Recurse -Force
           Write-Host "Injected PCA2023 offline assets: $pcaDestination"
+          $languageSource = "assets\release\lang"
+          $languageDestination = Join-Path $mount "Program Files\LetRecoveryPE\lang"
+          New-Item -ItemType Directory -Force -Path $languageDestination | Out-Null
+          Copy-Item -Path (Join-Path $languageSource "*.json") -Destination $languageDestination -Force
+          Write-Host "Injected release language catalogs: $languageDestination"
           dism /Unmount-Image /MountDir:"$mount" /Commit
           if ($LASTEXITCODE -ne 0) { throw "DISM unmount/commit failed" }
 

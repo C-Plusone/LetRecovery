@@ -15,10 +15,31 @@ use serde::{Deserialize, Serialize};
 
 use super::path::get_exe_dir;
 
-/// The PE image is an independently replaceable user-managed artifact.  Keep the
-/// current English table in the executable as a missing-key fallback so an EXE
-/// update can add UI text without rewriting the WIM's language resources.
-const EMBEDDED_EN_US: &str = include_str!("../../../assets/release/lang/en-US.json");
+/// The PE image is an independently replaceable user-managed artifact. Keep release catalogs in
+/// the executable so an EXE update can add languages and missing UI text without rewriting the
+/// WIM's language resources. Files in `lang` remain optional user overrides.
+const EMBEDDED_LANGUAGE_CATALOGS: [(&str, &str); 5] = [
+    (
+        "en-US",
+        include_str!("../../../assets/release/lang/en-US.json"),
+    ),
+    (
+        "ja-JP",
+        include_str!("../../../assets/release/lang/ja-JP.json"),
+    ),
+    (
+        "ko-KR",
+        include_str!("../../../assets/release/lang/ko-KR.json"),
+    ),
+    (
+        "fr-FR",
+        include_str!("../../../assets/release/lang/fr-FR.json"),
+    ),
+    (
+        "de-DE",
+        include_str!("../../../assets/release/lang/de-DE.json"),
+    ),
+];
 
 /// 语言文件结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,10 +145,7 @@ fn load_language_internal(manager: &mut I18nManager, language_code: &str) {
 
     if !lang_file.exists() {
         if apply_language_fallback(manager, language_code) {
-            log::warn!(
-                "语言文件不存在: {}，使用程序内置英文翻译",
-                lang_file.display()
-            );
+            log::warn!("语言文件不存在: {}，使用程序内置翻译", lang_file.display());
         } else {
             log::warn!("语言文件不存在: {}，使用简体中文", lang_file.display());
         }
@@ -150,7 +168,7 @@ fn load_language_internal(manager: &mut I18nManager, language_code: &str) {
             Err(e) => {
                 if apply_language_fallback(manager, language_code) {
                     log::warn!(
-                        "解析语言文件失败: {} - {}，使用程序内置英文翻译",
+                        "解析语言文件失败: {} - {}，使用程序内置翻译",
                         lang_file.display(),
                         e
                     );
@@ -166,7 +184,7 @@ fn load_language_internal(manager: &mut I18nManager, language_code: &str) {
         Err(e) => {
             if apply_language_fallback(manager, language_code) {
                 log::warn!(
-                    "读取语言文件失败: {} - {}，使用程序内置英文翻译",
+                    "读取语言文件失败: {} - {}，使用程序内置翻译",
                     lang_file.display(),
                     e
                 );
@@ -187,9 +205,10 @@ fn use_builtin_chinese(manager: &mut I18nManager) {
 }
 
 fn embedded_language(language_code: &str) -> Option<LanguageFile> {
-    (language_code == "en-US")
-        .then(|| serde_json::from_str(EMBEDDED_EN_US).ok())
-        .flatten()
+    let (_, content) = EMBEDDED_LANGUAGE_CATALOGS
+        .iter()
+        .find(|(code, _)| code.eq_ignore_ascii_case(language_code))?;
+    serde_json::from_str(content).ok()
 }
 
 fn load_embedded_language(manager: &mut I18nManager, language_code: &str) -> bool {
@@ -202,7 +221,7 @@ fn load_embedded_language(manager: &mut I18nManager, language_code: &str) -> boo
 }
 
 /// 缺失、无法读取或无法解析外部语言文件时使用同一条确定性回退路径。
-/// 返回 true 表示已使用内置 en-US，false 表示回到内置简体中文。
+/// 返回 true 表示已使用受支持的内置语言，false 表示回到内置简体中文。
 fn apply_language_fallback(manager: &mut I18nManager, language_code: &str) -> bool {
     if load_embedded_language(manager, language_code) {
         true
@@ -222,6 +241,17 @@ fn merge_embedded_fallback(language_code: &str, external: &mut LanguageFile) {
     let mut merged = embedded.data;
     merged.extend(std::mem::take(&mut external.data));
     external.data = merged;
+}
+
+fn upsert_language_info(languages: &mut Vec<LanguageInfo>, language: LanguageInfo) {
+    if let Some(existing) = languages
+        .iter_mut()
+        .find(|existing| existing.code.eq_ignore_ascii_case(&language.code))
+    {
+        *existing = language;
+    } else {
+        languages.push(language);
+    }
 }
 
 /// 切换语言
@@ -291,8 +321,19 @@ pub fn scan_available_languages() -> Vec<LanguageInfo> {
         author: String::from("LetRecovery / Windows NLS"),
     });
 
+    for (code, _) in EMBEDDED_LANGUAGE_CATALOGS {
+        if let Some(language) = embedded_language(code) {
+            languages.push(LanguageInfo {
+                code: code.to_string(),
+                display_name: language.language,
+                author: language.author,
+            });
+        }
+    }
+
     let lang_dir = get_lang_dir();
     if !lang_dir.exists() {
+        languages[2..].sort_by(|a, b| a.display_name.cmp(&b.display_name));
         return languages;
     }
 
@@ -301,6 +342,7 @@ pub fn scan_available_languages() -> Vec<LanguageInfo> {
         Ok(e) => e,
         Err(e) => {
             log::warn!("无法读取语言目录: {} - {}", lang_dir.display(), e);
+            languages[2..].sort_by(|a, b| a.display_name.cmp(&b.display_name));
             return languages;
         }
     };
@@ -328,11 +370,14 @@ pub fn scan_available_languages() -> Vec<LanguageInfo> {
         match std::fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str::<LanguageFile>(&content) {
                 Ok(lang_data) => {
-                    languages.push(LanguageInfo {
-                        code,
-                        display_name: lang_data.language,
-                        author: lang_data.author,
-                    });
+                    upsert_language_info(
+                        &mut languages,
+                        LanguageInfo {
+                            code,
+                            display_name: lang_data.language,
+                            author: lang_data.author,
+                        },
+                    );
                 }
                 Err(e) => {
                     log::debug!("解析语言文件失败: {} - {}", path.display(), e);
@@ -431,6 +476,20 @@ mod tests {
     use super::*;
     use crate::tr;
 
+    fn placeholders(text: &str) -> Vec<String> {
+        let mut placeholders = Vec::new();
+        let mut remaining = text;
+        while let Some(open) = remaining.find('{') {
+            let after_open = &remaining[open..];
+            let Some(close) = after_open.find('}') else {
+                break;
+            };
+            placeholders.push(after_open[..=close].to_string());
+            remaining = &after_open[close + 1..];
+        }
+        placeholders
+    }
+
     #[test]
     fn test_translate_no_translation() {
         init("zh-CN");
@@ -493,14 +552,60 @@ mod tests {
     }
 
     #[test]
-    fn embedded_english_is_available_without_wim_language_updates() {
+    fn embedded_release_catalogs_are_available_without_wim_language_updates() {
         let language = embedded_language("en-US").expect("embedded en-US must be valid JSON");
         assert_eq!(language.language, "English (United States)");
         assert_eq!(
             language.data.get("系统安装").map(String::as_str),
             Some("System Installation")
         );
-        assert!(embedded_language("de-DE").is_none());
+        assert!(
+            embedded_language("de-DE")
+                .expect("embedded de-DE must be valid JSON")
+                .data
+                .contains_key("系统安装"),
+            "embedded de-DE must cover the system installation label"
+        );
+    }
+
+    #[test]
+    fn embedded_release_catalogs_are_complete_and_preserve_placeholders() {
+        let english = embedded_language("en-US").expect("embedded en-US must be valid JSON");
+
+        for (code, _) in EMBEDDED_LANGUAGE_CATALOGS {
+            let catalog = embedded_language(code)
+                .unwrap_or_else(|| panic!("embedded {code} must be valid JSON"));
+            assert_eq!(
+                catalog.data.len(),
+                english.data.len(),
+                "{code} must contain the complete release key set"
+            );
+            for (key, english_value) in &english.data {
+                let translated = catalog
+                    .data
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{code} is missing key {key}"));
+                assert!(
+                    !translated.trim().is_empty(),
+                    "{code} has an empty key {key}"
+                );
+                assert_eq!(
+                    placeholders(translated),
+                    placeholders(english_value),
+                    "{code} changed placeholders for key {key}"
+                );
+            }
+        }
+
+        let languages = scan_available_languages();
+        for (code, _) in EMBEDDED_LANGUAGE_CATALOGS {
+            assert!(
+                languages
+                    .iter()
+                    .any(|language| language.code.eq_ignore_ascii_case(code)),
+                "{code} must be listed without external WIM language files"
+            );
+        }
     }
 
     #[test]
@@ -536,20 +641,20 @@ mod tests {
     #[test]
     fn unsupported_language_fallback_and_merge_behavior_are_unchanged() {
         let mut manager = I18nManager::new();
-        assert!(!apply_language_fallback(&mut manager, "de-DE"));
+        assert!(!apply_language_fallback(&mut manager, "es-ES"));
         assert_eq!(manager.current_language, "zh-CN");
         assert!(manager.translations.is_empty());
 
         let mut external = LanguageFile {
-            language: "Deutsch".to_string(),
+            language: "Español".to_string(),
             author: "User".to_string(),
-            data: HashMap::from([("系统安装".to_string(), "Systeminstallation".to_string())]),
+            data: HashMap::from([("系统安装".to_string(), "Instalación".to_string())]),
         };
-        merge_embedded_fallback("de-DE", &mut external);
+        merge_embedded_fallback("es-ES", &mut external);
         assert_eq!(external.data.len(), 1);
         assert_eq!(
             external.data.get("系统安装").map(String::as_str),
-            Some("Systeminstallation")
+            Some("Instalación")
         );
         assert!(!external.data.contains_key("系统备份"));
     }

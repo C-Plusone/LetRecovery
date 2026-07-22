@@ -1,5 +1,9 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    // Keep the date-based version synchronized with the PE sources that produced the binary.
+    // Without these inputs Cargo may reuse an older BUILD_VERSION while compiling changed code.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.toml");
 
     // 注：libwim-15.dll 已内置于共享库 lr-core，运行时自动释放到 exe 目录，
     // 这里不再需要从 vendor 复制。
