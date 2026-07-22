@@ -217,6 +217,28 @@ jobs:
           }
           Write-Host "Validated and synchronized $($codes.Count) release language catalogs."
 
+      - name: Synchronize normal-side easter egg audio
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = "assets\release\bin\dprk_easter_egg.mp3"
+          $destination = "pkg\bin\dprk_easter_egg.mp3"
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "缺少正常系统端彩蛋音频: $source"
+          }
+          $sourceInfo = Get-Item -LiteralPath $source
+          if ($sourceInfo.Length -lt 65536) {
+            throw "正常系统端彩蛋音频大小异常: $($sourceInfo.Length) bytes"
+          }
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+          Copy-Item -LiteralPath $source -Destination $destination -Force
+          $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+          $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+          if ($sourceHash -ne $destinationHash) {
+            throw "正常系统端彩蛋音频复制后 SHA-256 不一致"
+          }
+          Write-Host "Synchronized normal-side easter egg audio: $destination ($sourceHash)"
+
       - name: Replace system-side exe
         shell: bash
         run: |

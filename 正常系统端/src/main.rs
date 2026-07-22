@@ -42,9 +42,6 @@ fn main() -> anyhow::Result<()> {
 
     // 初始化国际化系统
     utils::i18n::init(&app_config.language);
-    if let Err(error) = utils::dprk_easter_egg::sync_for_language(&app_config.language) {
-        log::warn!("同步朝鲜文彩蛋壁纸失败: {error:#}");
-    }
 
     // 应用 WIM 镜像引擎选择（libwim / wimgapi），供后续所有镜像操作使用
     app_config.apply_wim_engine();
@@ -126,14 +123,19 @@ fn main() -> anyhow::Result<()> {
         // Deterministic visual-regression entry: bypass single-instance state and vendor
         // WMI/SetupAPI providers, but retain the real config, native controls and message loop.
         // This branch is absent from release builds and the dangerous CLI guard has already run.
-        native_ui::run(Arc::new(PreloadedConfig {
+        if let Err(error) = utils::dprk_easter_egg::sync_for_language(&app_config.language) {
+            log::warn!("同步朝鲜文彩蛋失败: {error:#}");
+        }
+        let run_result = native_ui::run(Arc::new(PreloadedConfig {
             app_config: app_config.clone(),
             remote_config: None,
             system_info: None,
             hardware_info: None,
             partitions: Vec::new(),
             pca_firmware_receiver: Mutex::new(None),
-        }))?;
+        }));
+        utils::dprk_easter_egg::shutdown();
+        run_result?;
         return Ok(());
     }
 
@@ -218,7 +220,12 @@ fn main() -> anyhow::Result<()> {
     log::info!("预加载完成，初始化 GUI...");
 
     log::info!("启动原生 Win32 窗口...");
-    native_ui::run(preloaded_config)?;
+    if let Err(error) = utils::dprk_easter_egg::sync_for_language(&app_config.language) {
+        log::warn!("同步朝鲜文彩蛋失败: {error:#}");
+    }
+    let run_result = native_ui::run(preloaded_config);
+    utils::dprk_easter_egg::shutdown();
+    run_result?;
     Ok(())
 }
 

@@ -54,6 +54,7 @@ windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
+    "Win32_Media_Multimedia",
     # WMI COM 支持 (替代 wmic 命令行)
     "Win32_System_Com",
     "Win32_System_Ole",

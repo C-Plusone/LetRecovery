@@ -11038,6 +11038,7 @@ unsafe extern "system" fn window_proc(
             let _ = KillTimer(hwnd, HARDWARE_COPY_TIMER_ID);
             let _ = KillTimer(hwnd, INSTALL_VOLUME_LAYOUT_TIMER_ID);
             let _ = KillTimer(hwnd, PARTITION_REFRESH_TIMER_ID);
+            crate::utils::dprk_easter_egg::shutdown();
             PostQuitMessage(0);
             LRESULT(0)
         }
