@@ -1573,9 +1573,9 @@ unsafe fn paint_list_view_header_join(frame: HWND, palette: Palette) {
     fill(
         dc,
         &RECT {
-            left: geometry.radius,
+            left: geometry.side_band.min(width),
             top,
-            right: width - geometry.radius,
+            right: width - geometry.side_band.min(width),
             bottom,
         },
         palette.button,
