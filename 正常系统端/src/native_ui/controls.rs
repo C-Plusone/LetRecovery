@@ -1437,6 +1437,18 @@ pub(crate) unsafe fn list_view_frame(list: HWND) -> Option<HWND> {
     Some(frame)
 }
 
+pub(crate) unsafe fn list_view_frame_owner(frame: HWND) -> Option<HWND> {
+    let handle = GetPropW(frame, LIST_VIEW_OWNER_PROPERTY);
+    if handle.is_invalid() {
+        return None;
+    }
+    let owner = HWND(handle.0);
+    if !IsWindow(owner).as_bool() || list_view_frame(owner)? != frame {
+        return None;
+    }
+    Some(owner)
+}
+
 pub(crate) unsafe fn publish_list_view_frame(list: HWND) {
     let Some(frame) = list_view_frame(list) else {
         return;

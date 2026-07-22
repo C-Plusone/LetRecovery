@@ -41,7 +41,7 @@ use winreg::RegKey;
 use super::controls::{
     alpha_blend_premultiplied_bgra, button_visual, draw_antialiased_control_frame,
     draw_native_text, draw_opaque_surface_text, draw_progress, ensure_list_view_frame,
-    fill_round_rect_antialiased, list_view_frame, publish_list_view_frame,
+    fill_round_rect_antialiased, list_view_frame, list_view_frame_owner, publish_list_view_frame,
     rounded_control_frame_geometry, single_line_edit_frame, single_line_edit_frame_owner,
     ButtonRole, ControlState, InnoMetrics, ProgressRole,
 };
@@ -1521,7 +1521,9 @@ unsafe extern "system" fn list_view_frame_subclass(
             let _ = GetClientRect(hwnd, &mut client);
             fill(dc, &client, palette_from_reference(reference_data).edit);
             let _ = EndPaint(hwnd, &paint);
-            paint_rounded_control_frame(hwnd, palette_from_reference(reference_data));
+            let palette = palette_from_reference(reference_data);
+            paint_rounded_control_frame(hwnd, palette);
+            paint_list_view_header_join(hwnd, palette);
             LRESULT(0)
         }
         WM_ENABLE | WM_SIZE | WM_THEMECHANGED => {
@@ -1539,6 +1541,46 @@ unsafe extern "system" fn list_view_frame_subclass(
         }
         _ => DefSubclassProc(hwnd, message, wparam, lparam),
     }
+}
+
+unsafe fn paint_list_view_header_join(frame: HWND, palette: Palette) {
+    let Some(list) = list_view_frame_owner(frame) else {
+        return;
+    };
+    if SendMessageW(list, 0x101f, WPARAM(0), LPARAM(0)).0 == 0 {
+        return;
+    }
+    let mut window = RECT::default();
+    if GetWindowRect(frame, &mut window).is_err() {
+        return;
+    }
+    let width = (window.right - window.left).max(0);
+    let height = (window.bottom - window.top).max(0);
+    let Some(geometry) =
+        rounded_control_frame_geometry(width, height, GetDpiForWindow(frame).max(96))
+    else {
+        return;
+    };
+    let top = geometry.side_band.min(height);
+    let bottom = (top + 1).min(height);
+    if bottom <= top || width <= geometry.radius.saturating_mul(2) {
+        return;
+    }
+    let dc = GetWindowDC(frame);
+    if dc.is_invalid() {
+        return;
+    }
+    fill(
+        dc,
+        &RECT {
+            left: geometry.radius,
+            top,
+            right: width - geometry.radius,
+            bottom,
+        },
+        palette.button,
+    );
+    let _ = ReleaseDC(frame, dc);
 }
 
 unsafe extern "system" fn list_view_subclass(
