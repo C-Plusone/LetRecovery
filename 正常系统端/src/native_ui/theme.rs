@@ -27,13 +27,13 @@ use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindow
 use windows::Win32::UI::WindowsAndMessaging::WS_VSCROLL;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetClientRect, GetCursorPos, GetParent, GetPropW, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HideCaret, PostMessageW, RemovePropW,
-    SendMessageW, SetPropW, SetWindowLongPtrW, SetWindowPos, ShowCaret, GWL_EXSTYLE, GWL_STYLE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_CANCELMODE,
-    WM_CAPTURECHANGED, WM_ENABLE, WM_ERASEBKGND, WM_GETFONT, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCPAINT, WM_NOTIFY, WM_PAINT,
-    WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SIZE, WM_THEMECHANGED, WS_BORDER, WS_CLIPCHILDREN,
-    WS_EX_CLIENTEDGE, WS_EX_LAYERED,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HideCaret, KillTimer, PostMessageW,
+    RemovePropW, SendMessageW, SetPropW, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowCaret,
+    GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    WM_CANCELMODE, WM_CAPTURECHANGED, WM_ENABLE, WM_ERASEBKGND, WM_GETFONT, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCPAINT, WM_NOTIFY,
+    WM_PAINT, WM_SETCURSOR, WM_SETFOCUS, WM_SETTEXT, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WS_BORDER,
+    WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_EX_LAYERED,
 };
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
@@ -633,6 +633,32 @@ unsafe fn set_list_view_colors(list: HWND, palette: Palette) {
     }
 }
 
+unsafe fn schedule_list_view_scroll_redraw(hwnd: HWND) {
+    if !GetPropW(hwnd, LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY).is_invalid() {
+        return;
+    }
+    if SetPropW(
+        hwnd,
+        LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY,
+        HANDLE(std::ptr::dangling_mut::<core::ffi::c_void>()),
+    )
+    .is_err()
+    {
+        let _ = InvalidateRect(hwnd, None, false);
+        return;
+    }
+    if SetTimer(
+        hwnd,
+        LIST_VIEW_SCROLL_REDRAW_TIMER_ID,
+        LIST_VIEW_SCROLL_REDRAW_INTERVAL_MS,
+        None,
+    ) == 0
+    {
+        let _ = RemovePropW(hwnd, LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY);
+        let _ = InvalidateRect(hwnd, None, false);
+    }
+}
+
 /// Applies a deterministic Inno-style paint path to the one native progress control still used by
 /// a tool dialog.  UxTheme's progress class ignores the app dark mode and otherwise leaves a light
 /// trough in the partition-copy window.
@@ -663,6 +689,8 @@ pub unsafe fn apply_trackbar_theme(control: HWND, palette: Palette) {
 const HEADER_SUBCLASS_ID: usize = 0x4c52_4844;
 const LIST_VIEW_SUBCLASS_ID: usize = 0x4c52_4c56;
 const LIST_VIEW_PARENT_SUBCLASS_ID: usize = 0x4c52_4c50;
+const LIST_VIEW_SCROLL_REDRAW_TIMER_ID: usize = 0x4c52_5352;
+const LIST_VIEW_SCROLL_REDRAW_INTERVAL_MS: u32 = 16;
 const PROGRESS_SUBCLASS_ID: usize = 0x4c52_5052;
 const TRACKBAR_SUBCLASS_ID: usize = 0x4c52_5442;
 const CHECK_BOX_SUBCLASS_ID: usize = 0x4c52_4342;
@@ -680,6 +708,8 @@ const COMBO_SELECTION_ITEM_PREPARED_PROPERTY: PCWSTR =
 const RADIO_BUTTON_HOT_PROPERTY: PCWSTR = w!("LetRecovery.InnoRadio.Hot");
 const PALETTE_REFERENCE_DARK: usize = 0x1;
 const CHECK_BOX_HOT_PROPERTY: PCWSTR = w!("LetRecovery.InnoCheck.Hot");
+const LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY: PCWSTR =
+    w!("LetRecovery.InnoListView.ScrollRedrawPending");
 const WM_MOUSELEAVE_MESSAGE: u32 = 0x02a3;
 const WM_NCMOUSEMOVE_MESSAGE: u32 = 0x00a0;
 const WM_NCMOUSELEAVE_MESSAGE: u32 = 0x02a2;
@@ -1571,6 +1601,12 @@ unsafe extern "system" fn list_view_subclass(
             paint_rounded_control_frame(hwnd, palette_from_reference(reference_data));
             result
         }
+        WM_TIMER if wparam.0 == LIST_VIEW_SCROLL_REDRAW_TIMER_ID => {
+            let _ = KillTimer(hwnd, LIST_VIEW_SCROLL_REDRAW_TIMER_ID);
+            let _ = RemovePropW(hwnd, LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY);
+            let _ = InvalidateRect(hwnd, None, false);
+            LRESULT(0)
+        }
         message if native_scrollbar_may_repaint_frame(message) => {
             let result = DefSubclassProc(hwnd, message, wparam, lparam);
             if list_view_scrolls_client_pixels(message) {
@@ -1578,11 +1614,11 @@ unsafe extern "system" fn list_view_subclass(
                 // only the newly exposed strip. Our final rounded frame also touches that surface,
                 // so the optimisation otherwise copies the top/bottom edge into rows during a
                 // vertical drag and the side edge across the body during a horizontal drag.
-                // Queue one complete client repaint after default handling. InvalidateRect does
-                // not paint synchronously; USER32 merges repeated SB_THUMBTRACK invalidations and
-                // the existing LVS_EX_DOUBLEBUFFER path publishes the repaired body atomically.
-                // Do not paint the frame or Header directly from this high-frequency branch.
-                let _ = InvalidateRect(hwnd, None, false);
+                // Raw SB_THUMBTRACK traffic can exceed the display refresh rate. Queue at most one
+                // ordinary invalidation per 16 ms frame; USER32 remains responsible for merging
+                // and painting through the existing LVS_EX_DOUBLEBUFFER path. Do not synchronously
+                // repaint the body, frame or Header from this high-frequency branch.
+                schedule_list_view_scroll_redraw(hwnd);
             }
             result
         }
@@ -1600,6 +1636,8 @@ unsafe extern "system" fn list_view_subclass(
             result
         }
         WM_NCDESTROY => {
+            let _ = KillTimer(hwnd, LIST_VIEW_SCROLL_REDRAW_TIMER_ID);
+            let _ = RemovePropW(hwnd, LIST_VIEW_SCROLL_REDRAW_PENDING_PROPERTY);
             let _ = RemoveWindowSubclass(hwnd, Some(list_view_subclass), LIST_VIEW_SUBCLASS_ID);
             DefSubclassProc(hwnd, message, wparam, lparam)
         }

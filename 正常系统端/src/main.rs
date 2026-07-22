@@ -660,7 +660,7 @@ fn execute_pe_install(
 
     log::info!("[PE INSTALL] Step 5: 应用高级选项");
     // 应用高级选项
-    let advanced_options = core::advanced_options_legacy::AdvancedOptions {
+    let advanced_options = core::advanced_options::AdvancedOptions {
         remove_shortcut_arrow: config.remove_shortcut_arrow,
         restore_classic_context_menu: config.restore_classic_context_menu,
         bypass_nro: config.bypass_nro,
@@ -675,7 +675,7 @@ fn execute_pe_install(
         username: config.custom_username.clone(),
         xp_inject_usb3_driver: config.xp_inject_usb3_driver,
         xp_inject_nvme_driver: config.xp_inject_nvme_driver,
-        ..core::advanced_options_legacy::AdvancedOptions::default()
+        ..core::advanced_options::AdvancedOptions::default()
     };
 
     if let Err(error) = advanced_options.apply_to_system(target_partition, is_xp) {

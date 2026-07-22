@@ -22,7 +22,7 @@ pub enum NativeExpandCAnalysisError {
     DisabledInDevelopment,
 }
 
-/// Reads the current disk inventory and computes the same limits as the legacy egui dialog.
+/// Reads the current disk inventory and computes the established expand-C safety limits.
 /// The returned snapshot is advisory: the eventual PE handoff must enumerate again and compare a
 /// stable disk/partition fingerprint before writing anything.
 #[cfg(feature = "non-elevated-tests")]

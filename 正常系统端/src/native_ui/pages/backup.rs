@@ -221,7 +221,7 @@ pub struct BackupPartitionRow {
     pub is_system_partition: bool,
 }
 
-/// Preserves the source-selection behavior of the last egui backup page.
+/// Preserves the established backup source-selection behavior.
 ///
 /// The desktop selects the current system partition. PE selects a Windows partition only when
 /// exactly one candidate exists; with zero or multiple offline systems it deliberately leaves the

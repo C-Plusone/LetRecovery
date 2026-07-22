@@ -1237,9 +1237,7 @@ impl ProductionInstallBackend {
         }
     }
 
-    fn legacy_advanced(
-        intent: &StartInstallIntent,
-    ) -> super::advanced_options_legacy::AdvancedOptions {
+    fn legacy_advanced(intent: &StartInstallIntent) -> super::advanced_options::AdvancedOptions {
         (&intent.options.advanced_options).into()
     }
 

@@ -3849,12 +3849,6 @@ impl NativeWindow {
         }
         if redraw.is_some() {
             redraw::resume_client(hwnd, redraw);
-            // The shared title/description change text while their STATIC redraw is suspended.
-            // Publish both redirected child surfaces after the root transaction so DWM cannot
-            // retain an empty intermediate label surface from the previous page.
-            for label in [h.title, h.description] {
-                let _ = RedrawWindow(label, None, None, RDW_INVALIDATE | RDW_UPDATENOW);
-            }
         } else if manage_redraw {
             let _ = InvalidateRect(hwnd, None, false);
         }

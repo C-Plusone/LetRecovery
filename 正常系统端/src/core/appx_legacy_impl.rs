@@ -1,8 +1,8 @@
-//! APPX应用管理模块
+//! APPX 应用库存与移除实现。
 //!
 //! 使用Windows Runtime API和文件系统操作管理APPX应用
 
-use super::types::AppxPackageInfo;
+use super::tool_types::AppxPackageInfo;
 use std::collections::HashSet;
 use std::path::Path;
 

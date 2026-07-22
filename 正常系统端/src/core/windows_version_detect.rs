@@ -1,4 +1,4 @@
-//! Windows版本检测模块
+//! 离线 Windows 版本检测实现。
 //!
 //! 提供对离线Windows分区的精确版本检测
 
@@ -493,13 +493,13 @@ pub fn detect_architecture(partition: &str) -> String {
 /// 获取Windows分区信息列表（用于下拉框显示）
 pub fn get_windows_partition_infos(
     partitions: &[crate::core::disk::Partition],
-) -> Vec<super::types::WindowsPartitionInfo> {
+) -> Vec<super::tool_types::WindowsPartitionInfo> {
     partitions
         .iter()
         .filter(|p| p.has_windows && p.letter.to_uppercase() != "X:")
         .map(|p| {
             let (version, arch) = get_windows_version_info(&p.letter);
-            super::types::WindowsPartitionInfo {
+            super::tool_types::WindowsPartitionInfo {
                 letter: p.letter.clone(),
                 windows_version: version,
                 architecture: arch,

@@ -1,4 +1,4 @@
-//! 工具箱类型定义
+//! Shared toolbox data types used by the native UI and core backends.
 
 /// 驱动备份/还原模式
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

@@ -1,8 +1,7 @@
 //! Read-only inventory loaders for native mutating-tool dialogs.
 
-#[path = "../ui/tools/version_detect.rs"]
-mod version_detect;
-use super::legacy_tool_types as types;
+#[cfg(not(feature = "non-elevated-tests"))]
+use super::windows_version_detect as version_detect;
 
 #[cfg(not(feature = "non-elevated-tests"))]
 use lr_core::command::{CommandExecutor, CommandRequest, SystemCommandExecutor};

@@ -77,7 +77,7 @@ pub struct AdvancedOptionsData {
     pub xp_defaults_applied: bool,
 }
 
-impl From<&AdvancedOptionsData> for super::advanced_options_legacy::AdvancedOptions {
+impl From<&AdvancedOptionsData> for super::advanced_options::AdvancedOptions {
     fn from(value: &AdvancedOptionsData) -> Self {
         Self {
             remove_shortcut_arrow: value.remove_shortcut_arrow,

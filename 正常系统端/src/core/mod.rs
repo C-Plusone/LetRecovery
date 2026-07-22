@@ -1,4 +1,6 @@
+pub mod advanced_options;
 pub mod app_config;
+mod appx_legacy_impl;
 pub mod bcdedit;
 pub mod bitlocker;
 pub mod cabinet;
@@ -14,8 +16,6 @@ pub mod hardware_info;
 pub mod image_verify;
 pub mod install_config;
 pub mod iso;
-#[path = "../ui/tools/types.rs"]
-pub(crate) mod legacy_tool_types;
 pub mod native_appx;
 pub(crate) mod native_appx_legacy;
 pub mod native_appx_selection;
@@ -48,13 +48,17 @@ pub mod native_tool_inventory;
 pub mod native_tools_controller;
 pub mod native_wifi;
 pub mod nvidia_driver;
+mod partition_copy_impl;
 pub mod pca_preflight;
 pub mod pe;
 pub mod quick_partition;
 pub mod registry;
 pub mod system_info;
 pub mod system_utils;
+mod tool_actions;
+mod tool_driver;
+mod tool_network;
+mod tool_time_sync;
+pub(crate) mod tool_types;
 pub mod ui_state;
-
-#[path = "../ui/advanced_options.rs"]
-pub mod advanced_options_legacy;
+mod windows_version_detect;

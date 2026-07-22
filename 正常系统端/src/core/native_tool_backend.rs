@@ -1,14 +1,11 @@
 //! Production dispatch for confirmed native toolbox plans.
 //! Existing business modules remain the only owners of commands and mutations.
 
-#[path = "../ui/tools/actions.rs"]
-mod legacy_actions;
-#[path = "../ui/tools/driver.rs"]
-mod legacy_driver;
-#[path = "../ui/tools/network.rs"]
-mod legacy_network;
-#[path = "../ui/tools/time_sync.rs"]
-mod legacy_time_sync;
+#[cfg(not(feature = "non-elevated-tests"))]
+use super::{
+    tool_actions as legacy_actions, tool_driver as legacy_driver, tool_network as legacy_network,
+    tool_time_sync as legacy_time_sync,
+};
 
 use super::native_appx::{RemoveAppxRequest, RemoveAppxResult};
 use super::native_batch_format::{BatchFormatExecutionResult, BatchFormatRequest};

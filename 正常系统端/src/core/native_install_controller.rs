@@ -104,7 +104,7 @@ impl std::fmt::Display for InstallValidationError {
 
 impl std::error::Error for InstallValidationError {}
 
-/// Runtime options previously assembled by the egui install button.
+/// Runtime options assembled from the validated native install-page controls.
 #[derive(Clone, Debug)]
 pub struct InstallOptions {
     pub format_partition: bool,

@@ -3,9 +3,7 @@
 //! Only current-system PackageManager operations are exposed. The legacy offline directory
 //! mutation branch is intentionally unreachable from native UI code.
 
-#[path = "../ui/tools/appx.rs"]
-mod appx;
-use super::legacy_tool_types as types;
+use super::{appx_legacy_impl as appx, tool_types as types};
 
 pub(crate) fn current_inventory() -> Vec<types::AppxPackageInfo> {
     appx::get_appx_packages("__CURRENT__")

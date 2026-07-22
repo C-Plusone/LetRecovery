@@ -196,7 +196,7 @@ impl NativeToolPlan {
     }
 }
 
-/// Maps a native toolbox click to the same state/action boundary as the legacy egui page.
+/// Maps a native toolbox click to the established state/action boundary.
 ///
 /// The returned value is deliberately inert.  Callers must enforce `availability`, then open the
 /// mapped dialog or perform the explicit bundled-tool launch through the existing action layer.

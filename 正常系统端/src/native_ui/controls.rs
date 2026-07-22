@@ -73,7 +73,7 @@ impl InnoMetrics {
             // counterpart, especially after the fixed-palette selection field was applied.
             field_height: scale(23),
             // Wizard check/list rows use a 22px minimum; using the same baseline keeps a popup
-            // readable without returning to the oversized legacy egui spacing.
+            // readable without returning to the former oversized spacing.
             list_item_height: scale(22),
             button_min_width: scale(75),
             button_padding_x: scale(14),

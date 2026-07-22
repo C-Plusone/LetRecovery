@@ -1,7 +1,6 @@
 //! Validated native partition-copy boundary.
 
-#[path = "../ui/tools/partition_copy.rs"]
-mod legacy_partition_copy;
+use super::partition_copy_impl as legacy_partition_copy;
 
 use std::collections::HashSet;
 
