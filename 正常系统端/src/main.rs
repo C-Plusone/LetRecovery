@@ -42,6 +42,9 @@ fn main() -> anyhow::Result<()> {
 
     // 初始化国际化系统
     utils::i18n::init(&app_config.language);
+    if let Err(error) = utils::dprk_easter_egg::sync_for_language(&app_config.language) {
+        log::warn!("同步朝鲜文彩蛋壁纸失败: {error:#}");
+    }
 
     // 应用 WIM 镜像引擎选择（libwim / wimgapi），供后续所有镜像操作使用
     app_config.apply_wim_engine();

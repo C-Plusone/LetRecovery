@@ -296,6 +296,9 @@ impl AppConfig {
         self.language = language_code.to_string();
         // 切换运行时语言
         crate::utils::i18n::switch_language(language_code);
+        if let Err(error) = crate::utils::dprk_easter_egg::sync_for_language(language_code) {
+            log::warn!("同步朝鲜文彩蛋壁纸失败: {error:#}");
+        }
         if let Err(e) = self.save() {
             log::warn!("保存配置失败: {}", e);
         }

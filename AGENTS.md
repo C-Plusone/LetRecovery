@@ -395,7 +395,8 @@ PCA2023 离线资源必须从已维护的微软官方介质或动态更新包制
 - `正常系统端/src/utils/cmd.rs`：隐藏控制台窗口的历史 Command 辅助；新危险命令应优先使用 `lr-core` 类型化边界。
 - `正常系统端/src/utils/command.rs`：共享命令边界的兼容再导出。
 - `正常系统端/src/utils/encoding.rs`：共享编码转换的兼容再导出。
-- `正常系统端/src/utils/i18n.rs`：语言文件扫描、加载、切换、翻译和参数替换；始终列出内置 `zh-CN` 与 `zh-TW`，繁体缺失词条调用共享 NLS 转换，可选外部 `zh-TW.json` 仅作覆盖；同时内嵌 `en-US`、`ja-JP`、`ko-KR`、`fr-FR`、`de-DE` 完整发布词表，外部同名 JSON 只覆盖键且缺失或损坏时回退内嵌表。
+- `正常系统端/src/utils/i18n.rs`：语言文件扫描、加载、切换、翻译和参数替换；始终列出内置 `zh-CN` 与 `zh-TW`，繁体缺失词条调用共享 NLS 转换，可选外部 `zh-TW.json` 仅作覆盖；同时内嵌 `en-US`、`ja-JP`、`ko-KR`、`fr-FR`、`de-DE` 完整发布词表，外部同名 JSON 只覆盖键且缺失或损坏时回退内嵌表；内置 `ko-KP` 彩蛋只替换经国际化层展示的界面文案，不得改写路径、分区名或安装配置业务值。
+- `正常系统端/src/utils/dprk_easter_egg.rs`：正常端 `ko-KP` 彩蛋的可逆桌面壁纸边界；从 EXE 内嵌 JPEG 原子发布到 LocalAppData，首次启用前保存当前壁纸路径，切回其他语言后恢复；PE 端不得调用该系统副作用。
 - `正常系统端/src/utils/logger.rs`：日志目录、滚动保留、格式、最新日志选择和脱敏 JSON 支持包导出。
 - `正常系统端/src/utils/path.rs`：exe、bin、用户管理 PE、受管 PE 下载缓存、工具、驱动、DiskPart 脚本及临时目录定位。
 - `正常系统端/src/utils/privilege.rs`：管理员权限检查和以管理员身份重启；`ShellExecuteW(runas)` 返回值小于等于 32 时必须报告提权失败，只有成功创建提升进程后当前进程才可退出。
@@ -441,7 +442,7 @@ PCA2023 离线资源必须从已维护的微软官方介质或动态更新包制
 - `PE端/src/utils/cmd.rs`：隐藏控制台窗口的历史 Command 创建辅助。
 - `PE端/src/utils/command.rs`：共享命令边界的兼容再导出。
 - `PE端/src/utils/encoding.rs`：共享编码转换的兼容再导出。
-- `PE端/src/utils/i18n.rs`：PE 语言文件扫描、加载、切换、翻译和参数替换；PE EXE 内嵌 `en-US`、`ja-JP`、`ko-KR`、`fr-FR`、`de-DE` 完整发布词表作为缺失键兜底，WIM 中的外部同名文件仍可覆盖同名键；内置 `zh-TW` 即使 WIM 没有外部语言表也通过共享 Windows NLS 完整转换，并允许外部同名词条覆盖。
+- `PE端/src/utils/i18n.rs`：PE 语言文件扫描、加载、切换、翻译和参数替换；PE EXE 内嵌 `en-US`、`ja-JP`、`ko-KR`、`fr-FR`、`de-DE` 完整发布词表作为缺失键兜底，WIM 中的外部同名文件仍可覆盖同名键；内置 `zh-TW` 即使 WIM 没有外部语言表也通过共享 Windows NLS 完整转换，并允许外部同名词条覆盖；正常端传入 `ko-KP` 时只启用统一朝鲜文彩蛋文案，不执行桌面壁纸副作用。
 - `PE端/src/utils/path.rs`：PE exe 和 bin 目录定位。
 - `PE端/src/utils/reboot.rs`：共享 `pecmd.exe` 结束逻辑的兼容再导出。
 

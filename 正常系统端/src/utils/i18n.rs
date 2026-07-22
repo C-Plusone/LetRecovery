@@ -85,6 +85,13 @@ impl I18nManager {
 /// 全局翻译管理器实例
 static I18N_MANAGER: OnceLock<RwLock<I18nManager>> = OnceLock::new();
 
+pub const DPRK_EASTER_EGG_LANGUAGE: &str = "ko-KP";
+pub const DPRK_EASTER_EGG_SLOGAN: &str = "김정은장군 만세!";
+
+pub fn is_dprk_easter_egg_language(language_code: &str) -> bool {
+    language_code.eq_ignore_ascii_case(DPRK_EASTER_EGG_LANGUAGE)
+}
+
 /// 获取语言文件目录路径（优先 bin/lang，不存在则回退 exe 同级 lang，兼容旧包）
 pub fn get_lang_dir() -> PathBuf {
     let in_bin = get_bin_dir().join("lang");
@@ -118,6 +125,13 @@ fn load_language_internal(manager: &mut I18nManager, language_code: &str) {
         manager.current_language = String::from("zh-CN");
         manager.translations.clear();
         log::info!("语言设置为简体中文（内置）");
+        return;
+    }
+
+    if is_dprk_easter_egg_language(language_code) {
+        manager.current_language = DPRK_EASTER_EGG_LANGUAGE.to_string();
+        manager.translations.clear();
+        log::info!("已启用朝鲜文彩蛋语言");
         return;
     }
 
@@ -285,16 +299,24 @@ pub fn translate(text: &str) -> String {
     let manager = I18N_MANAGER.get_or_init(|| RwLock::new(I18nManager::new()));
     let guard = manager.read();
 
+    translate_internal(&guard, text)
+}
+
+fn translate_internal(manager: &I18nManager, text: &str) -> String {
+    if is_dprk_easter_egg_language(&manager.current_language) {
+        return DPRK_EASTER_EGG_SLOGAN.to_string();
+    }
+
     // 简体中文直接使用源字符串。
-    if guard.current_language == "zh-CN" {
+    if manager.current_language == "zh-CN" {
         return text.to_string();
     }
 
-    if let Some(translated) = guard.translations.get(text) {
+    if let Some(translated) = manager.translations.get(text) {
         return translated.clone();
     }
 
-    if guard.current_language.eq_ignore_ascii_case("zh-TW") {
+    if manager.current_language.eq_ignore_ascii_case("zh-TW") {
         return lr_core::traditional_chinese::to_traditional_chinese(text);
     }
 
@@ -317,6 +339,11 @@ pub fn scan_available_languages() -> Vec<LanguageInfo> {
         code: String::from("zh-TW"),
         display_name: String::from("繁體中文 - 中國台灣"),
         author: String::from("LetRecovery / Windows NLS"),
+    });
+    languages.push(LanguageInfo {
+        code: DPRK_EASTER_EGG_LANGUAGE.to_string(),
+        display_name: String::from("조선말 - 조선민주주의인민공화국"),
+        author: String::from("LetRecovery Easter Egg"),
     });
 
     for (code, _) in EMBEDDED_LANGUAGE_CATALOGS {
@@ -508,6 +535,23 @@ mod tests {
         assert!(languages.iter().any(|language| {
             language.code == "zh-TW" && language.display_name == "繁體中文 - 中國台灣"
         }));
+    }
+
+    #[test]
+    fn dprk_easter_egg_replaces_every_translated_label() {
+        let mut manager = I18nManager::new();
+        load_language_internal(&mut manager, DPRK_EASTER_EGG_LANGUAGE);
+        assert_eq!(
+            translate_internal(&manager, "系统安装"),
+            DPRK_EASTER_EGG_SLOGAN
+        );
+        assert_eq!(
+            translate_internal(&manager, "任意未收录文案"),
+            DPRK_EASTER_EGG_SLOGAN
+        );
+        assert!(scan_available_languages()
+            .iter()
+            .any(|language| language.code == DPRK_EASTER_EGG_LANGUAGE));
     }
 
     #[test]

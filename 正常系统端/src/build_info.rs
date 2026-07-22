@@ -39,7 +39,9 @@ pub fn description() -> String {
 }
 
 pub fn display_version() -> String {
-    if DEV {
+    if crate::utils::i18n::is_dprk_easter_egg_language(&crate::utils::i18n::current_language()) {
+        crate::tr!(env!("BUILD_VERSION"))
+    } else if DEV {
         crate::tr!("{}（测试版）", env!("BUILD_VERSION"))
     } else {
         env!("BUILD_VERSION").to_owned()

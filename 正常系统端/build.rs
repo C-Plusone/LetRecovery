@@ -7,6 +7,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=assets/icon.png");
+    println!("cargo:rerun-if-changed=assets/easter_egg/dprk_wallpaper.jpg");
     println!("cargo:rerun-if-changed=assets/win11_button_theme");
 
     // 注：libwim-15.dll 已内置于共享库 lr-core，运行时自动释放到 exe 目录，

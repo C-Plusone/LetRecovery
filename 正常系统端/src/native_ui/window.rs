@@ -9482,7 +9482,7 @@ impl NativeWindow {
             set_text(handles.boot_label, &crate::tr!("引导模式:"));
             replace_combo_labels(
                 handles.boot_mode,
-                &[crate::tr!("自动"), "UEFI".to_owned(), "Legacy".to_owned()],
+                &[crate::tr!("自动"), crate::tr!("UEFI"), crate::tr!("Legacy")],
             );
             set_text(handles.pca_label, &crate::tr!("启动签名:"));
             self.update_pca_combo_labels();
@@ -9500,7 +9500,7 @@ impl NativeWindow {
                     crate::tr!("可用空间"),
                     crate::tr!("卷标"),
                     crate::tr!("分区表"),
-                    "BitLocker".to_owned(),
+                    crate::tr!("BitLocker"),
                     crate::tr!("状态"),
                 ],
             );
