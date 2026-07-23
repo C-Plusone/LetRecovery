@@ -45,12 +45,12 @@ pub enum ToolIntent {
     VerifyFileHash,
     ResetPassword,
     ExpandC,
+    HardwareInspector,
 }
 
 impl ToolIntent {
-    /// The first nineteen entries are the existing native command ABI.  Expand C is appended so
-    /// restoring the twentieth legacy tool cannot renumber any migrated tool.
-    pub const ALL: [Self; 20] = [
+    /// Existing command IDs remain stable; new tools are appended.
+    pub const ALL: [Self; 21] = [
         Self::NvidiaDriverRemoval,
         Self::PartitionCopy,
         Self::BatchFormat,
@@ -71,6 +71,7 @@ impl ToolIntent {
         Self::VerifyFileHash,
         Self::ResetPassword,
         Self::ExpandC,
+        Self::HardwareInspector,
     ];
 
     pub const fn command_id(self) -> u16 {
@@ -117,7 +118,7 @@ fn tool_grid_layout(rect: PageRect, dpi: u32) -> ToolGridLayout {
 
 pub struct ToolsPage {
     pub introduction: HWND,
-    pub buttons: [HWND; 20],
+    pub buttons: [HWND; 21],
 }
 
 impl ToolsPage {
@@ -128,15 +129,15 @@ impl ToolsPage {
         labels: &ToolLabels<'_>,
     ) -> windows::core::Result<Self> {
         let introduction = child(parent, w!("STATIC"), labels.introduction, 0, 5_099)?;
-        let mut buttons = [HWND::default(); 20];
+        let mut buttons = [HWND::default(); 21];
         for (index, intent) in ToolIntent::ALL.into_iter().enumerate() {
             // Keep the existing `ToolLabels` contract untouched for the first nineteen tools.
             // The restored legacy entry owns its caption here until the host adopts a dedicated
             // label field; this prevents an unrelated window.rs edit from being required.
-            let label = if intent == ToolIntent::ExpandC {
-                crate::tr!("无损扩大C盘")
-            } else {
-                labels.buttons[index].to_owned()
+            let label = match intent {
+                ToolIntent::ExpandC => crate::tr!("无损扩大C盘"),
+                ToolIntent::HardwareInspector => crate::tr!("详细硬件检测"),
+                _ => labels.buttons[index].to_owned(),
             };
             buttons[index] = child(
                 parent,
@@ -168,10 +169,14 @@ impl ToolsPage {
             ToolIntent::SoftwareList,
             ToolIntent::ResetNetwork,
             ToolIntent::ExpandC,
+            ToolIntent::HardwareInspector,
         ] {
             let supported = match intent {
                 ToolIntent::RepairBoot => is_pe,
-                ToolIntent::SoftwareList | ToolIntent::ResetNetwork | ToolIntent::ExpandC => !is_pe,
+                ToolIntent::SoftwareList
+                | ToolIntent::ResetNetwork
+                | ToolIntent::ExpandC
+                | ToolIntent::HardwareInspector => !is_pe,
                 _ => true,
             };
             let _ = EnableWindow(self.buttons[intent as usize], supported);
@@ -181,10 +186,10 @@ impl ToolsPage {
     pub unsafe fn relocalize(&self, labels: &ToolLabels<'_>) {
         set_text(self.introduction, labels.introduction);
         for (index, intent) in ToolIntent::ALL.into_iter().enumerate() {
-            let label = if intent == ToolIntent::ExpandC {
-                crate::tr!("无损扩大C盘")
-            } else {
-                labels.buttons[index].to_owned()
+            let label = match intent {
+                ToolIntent::ExpandC => crate::tr!("无损扩大C盘"),
+                ToolIntent::HardwareInspector => crate::tr!("详细硬件检测"),
+                _ => labels.buttons[index].to_owned(),
             };
             set_text(self.buttons[index], &label);
         }
@@ -256,7 +261,11 @@ mod tests {
             ToolsPage::command_intent(FIRST_TOOL_ID + 19),
             Some(ToolIntent::ExpandC)
         );
-        assert_eq!(ToolsPage::command_intent(FIRST_TOOL_ID + 20), None);
+        assert_eq!(
+            ToolsPage::command_intent(FIRST_TOOL_ID + 20),
+            Some(ToolIntent::HardwareInspector)
+        );
+        assert_eq!(ToolsPage::command_intent(FIRST_TOOL_ID + 21), None);
     }
 
     #[test]

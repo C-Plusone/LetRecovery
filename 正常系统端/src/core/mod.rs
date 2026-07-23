@@ -13,6 +13,7 @@ pub mod driver;
 pub mod gho_password;
 pub mod ghost;
 pub mod hardware_info;
+pub mod hardware_inspector;
 pub mod image_verify;
 pub mod install_config;
 pub mod iso;
