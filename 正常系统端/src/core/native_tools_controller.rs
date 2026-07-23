@@ -1,6 +1,6 @@
 ﻿//! Side-effect-free routing for the native toolbox page.
 //!
-//! This module preserves all twenty legacy toolbox entry points while keeping the native
+//! This module preserves all legacy toolbox entry points while keeping the native
 //! window message handler away from operational code.  A plan only identifies the existing
 //! dialog/action boundary and its safety class; it never starts a process, scans a disk, changes
 //! Windows state, or performs a privileged operation.
@@ -31,14 +31,14 @@ pub enum NativeToolAction {
     VerifyFileHash,
     ResetPassword,
     ExpandC,
+    HardwareInspector,
 }
 
 impl NativeToolAction {
     pub const FIRST_NATIVE_COMMAND_ID: u16 = 5_100;
 
-    /// The existing nineteen entries retain their command IDs; the restored Expand C route is
-    /// appended as command 5119.
-    pub const ALL: [Self; 20] = [
+    /// Existing command IDs remain stable; new tools are appended.
+    pub const ALL: [Self; 21] = [
         Self::NvidiaDriverRemoval,
         Self::PartitionCopy,
         Self::BatchFormat,
@@ -59,6 +59,7 @@ impl NativeToolAction {
         Self::VerifyFileHash,
         Self::ResetPassword,
         Self::ExpandC,
+        Self::HardwareInspector,
     ];
 
     /// Converts the stable zero-based native button position without accepting unknown IDs.
@@ -151,6 +152,7 @@ pub enum ToolDialogRoute {
     VerifyFileHash,
     ResetPassword,
     ExpandC,
+    HardwareInspector,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,6 +181,7 @@ pub enum ToolPreload {
     SoftwareInventory,
     BitLockerPartitions,
     ExpandCAnalysis,
+    HardwareSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,6 +331,12 @@ pub const fn plan_tool(intent: NativeToolAction) -> NativeToolPlan {
             Safety::DestructiveStorage,
             DesktopOnly,
         ),
+        NativeToolAction::HardwareInspector => (
+            OpenDialog(Dialog::HardwareInspector),
+            Preload::HardwareSnapshot,
+            Safety::ReadOnly,
+            DesktopOnly,
+        ),
     };
 
     NativeToolPlan {
@@ -344,9 +353,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_twenty_native_intents_have_stable_routes() {
+    fn all_native_intents_have_stable_routes() {
         let plans = NativeToolAction::ALL.map(plan_tool);
-        assert_eq!(plans.len(), 20);
+        assert_eq!(plans.len(), 21);
         for (index, plan) in plans.iter().enumerate() {
             assert_eq!(plan.intent, NativeToolAction::ALL[index]);
             assert_eq!(
@@ -362,7 +371,7 @@ mod tests {
         );
         assert_eq!(
             NativeToolAction::from_native_command_id(
-                NativeToolAction::FIRST_NATIVE_COMMAND_ID + 20
+                NativeToolAction::FIRST_NATIVE_COMMAND_ID + 21
             ),
             None
         );
@@ -380,7 +389,7 @@ mod tests {
                 .iter()
                 .filter(|plan| matches!(plan.route, ToolRoute::OpenDialog(_)))
                 .count(),
-            18
+            19
         );
     }
 
@@ -395,7 +404,8 @@ mod tests {
                 }
                 NativeToolAction::SoftwareList
                 | NativeToolAction::ResetNetwork
-                | NativeToolAction::ExpandC => {
+                | NativeToolAction::ExpandC
+                | NativeToolAction::HardwareInspector => {
                     assert!(plan.is_supported(ToolEnvironment::Desktop));
                     assert!(!plan.is_supported(ToolEnvironment::Pe));
                 }
@@ -433,6 +443,7 @@ mod tests {
             NativeToolAction::SoftwareList,
             NativeToolAction::VerifyImage,
             NativeToolAction::VerifyFileHash,
+            NativeToolAction::HardwareInspector,
         ] {
             assert_eq!(plan_tool(intent).safety, ToolSafetyClass::ReadOnly);
             assert!(!plan_tool(intent).safety.requires_explicit_execution());

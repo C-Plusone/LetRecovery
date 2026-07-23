@@ -5,6 +5,7 @@ pub mod batch_format;
 pub mod bitlocker_manage;
 pub mod boot_repair;
 pub mod expand_c;
+pub mod hardware_inspector;
 pub mod network_reset;
 pub mod nvidia_removal;
 pub mod partition_copy;

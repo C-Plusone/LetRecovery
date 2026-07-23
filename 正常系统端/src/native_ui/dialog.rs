@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumChildWindows,
     GetClassNameW, GetClientRect, GetMessageW, GetParent, GetWindowLongPtrW, GetWindowRect,
     IsDialogMessageW, IsWindow, IsWindowVisible, LoadCursorW, MoveWindow, RegisterClassExW,
-    SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
     TranslateMessage, BN_CLICKED, BS_OWNERDRAW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
     GWLP_USERDATA, HMENU, ICON_BIG, ICON_SMALL, IDC_ARROW, MSG, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE,
@@ -258,6 +258,7 @@ struct DialogState {
     primary_closes: bool,
     secondary_closes: bool,
     first_presentation_pending: bool,
+    selected_navigation_command: Option<u16>,
 }
 
 impl DialogState {
@@ -283,6 +284,7 @@ impl DialogState {
             primary_closes: true,
             secondary_closes: true,
             first_presentation_pending: true,
+            selected_navigation_command: None,
         }
     }
 
@@ -486,7 +488,9 @@ impl DialogState {
             self.draw_header(item);
             return;
         }
-        let role = if item.CtlID == u32::from(ID_PRIMARY) {
+        let role = if item.CtlID == u32::from(ID_PRIMARY)
+            || self.selected_navigation_command == Some(item.CtlID as u16)
+        {
             ButtonRole::Primary
         } else {
             ButtonRole::Secondary
@@ -642,6 +646,50 @@ impl DialogShell {
         if let Some(handles) = &self.state.handles {
             let _ = EnableWindow(handles.primary, enabled);
         }
+    }
+
+    pub unsafe fn set_selected_navigation_command(&mut self, command_id: u16) {
+        self.state.selected_navigation_command = Some(command_id);
+        if let Some(handles) = &self.state.handles {
+            let _ = RedrawWindow(
+                handles.content,
+                None,
+                None,
+                RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW,
+            );
+        }
+    }
+
+    /// Updates the visible shell text as one coherent localization transaction. Button presence
+    /// is fixed when the shell is created; callers may only replace labels for controls that
+    /// already exist.
+    pub unsafe fn relocalize(
+        &mut self,
+        window_title: &str,
+        title: &str,
+        description: &str,
+        primary: &str,
+    ) {
+        self.state.labels[0] = title.to_owned();
+        self.state.labels[1] = description.to_owned();
+        self.state.labels[2] = primary.to_owned();
+        let window_title = wide(window_title);
+        let title = wide(title);
+        let description = wide(description);
+        let primary = wide(primary);
+        let _ = SetWindowTextW(self.state.hwnd, PCWSTR(window_title.as_ptr()));
+        if let Some(handles) = &self.state.handles {
+            let _ = SetWindowTextW(handles.title, PCWSTR(title.as_ptr()));
+            let _ = SetWindowTextW(handles.description, PCWSTR(description.as_ptr()));
+            let _ = SetWindowTextW(handles.primary, PCWSTR(primary.as_ptr()));
+        }
+        self.state.layout();
+        let _ = RedrawWindow(
+            self.state.hwnd,
+            None,
+            None,
+            RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW,
+        );
     }
 
     /// Keeps a modeless primary command visible until the caller has validated the request and

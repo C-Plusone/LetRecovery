@@ -39,6 +39,7 @@ roxmltree = "0.20"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Nvme",
     "Win32_Storage_Vhd",
     "Win32_System_SystemInformation",
     "Win32_System_Registry",
@@ -54,6 +55,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
     "Win32_Media_Multimedia",
     # WMI COM 支持 (替代 wmic 命令行)
     "Win32_System_Com",

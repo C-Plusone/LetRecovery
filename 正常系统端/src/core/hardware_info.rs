@@ -27,8 +27,9 @@ use windows::Win32::System::Com::{
     RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, SAFEARRAY,
 };
 use windows::Win32::System::Ioctl::{
-    PropertyStandardQuery, StorageDeviceProperty, IOCTL_DISK_GET_LENGTH_INFO,
-    IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY,
+    PropertyStandardQuery, StorageDeviceProperty, DISK_GEOMETRY_EX,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_DISK_GET_LENGTH_INFO, IOCTL_STORAGE_QUERY_PROPERTY,
+    STORAGE_PROPERTY_QUERY,
 };
 use windows::Win32::System::Ole::SafeArrayGetElement;
 use windows::Win32::System::Registry::{
@@ -1433,7 +1434,7 @@ impl HardwareInfo {
 
     fn get_disk_info() -> Vec<DiskInfo> {
         let mut disks = Vec::new();
-        let partition_styles = get_disk_partition_styles();
+        let partition_layouts = get_disk_partition_styles();
 
         // 使用 WMI 获取磁盘大小
         let disk_sizes = get_disk_sizes_wmi();
@@ -1444,8 +1445,9 @@ impl HardwareInfo {
                 disk.disk_index = i;
                 // 使用综合检测方法判断是否为SSD
                 disk.is_ssd = detect_disk_is_ssd(i, &disk.model, &disk.interface_type);
-                if let Some(style) = partition_styles.get(&i) {
+                if let Some((style, partition_count)) = partition_layouts.get(&i) {
                     disk.partition_style = style.clone();
+                    disk.partitions = *partition_count;
                 }
                 // 如果DeviceIoControl没有获取到大小，使用WMI的结果
                 if disk.size == 0 {
@@ -1723,7 +1725,7 @@ fn check_cpu_ai_support(cpu_name: &str) -> bool {
 ///
 /// # Returns
 /// HashMap<磁盘编号, 分区样式字符串>，分区样式为 "GPT"、"MBR" 或 "RAW"
-fn get_disk_partition_styles() -> HashMap<u32, String> {
+fn get_disk_partition_styles() -> HashMap<u32, (String, u32)> {
     use windows::Win32::System::Ioctl::{
         IOCTL_DISK_GET_DRIVE_LAYOUT_EX, PARTITION_STYLE_GPT, PARTITION_STYLE_MBR,
     };
@@ -1744,7 +1746,7 @@ fn get_disk_partition_styles() -> HashMap<u32, String> {
 
     // 遍历物理磁盘 0-15（与 get_disk_info 保持一致）
     for disk_index in 0u32..16 {
-        let partition_style = unsafe {
+        let partition_layout = unsafe {
             // 构造物理磁盘路径
             let disk_path = format!("\\\\.\\PhysicalDrive{}", disk_index);
             let wide_path: Vec<u16> = disk_path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1791,22 +1793,25 @@ fn get_disk_partition_styles() -> HashMap<u32, String> {
 
                 // 将分区样式常量转换为字符串
                 if layout_header.partition_style == PARTITION_STYLE_GPT.0 as u32 {
-                    Some("GPT".to_string())
+                    Some(("GPT".to_string(), layout_header.partition_count))
                 } else if layout_header.partition_style == PARTITION_STYLE_MBR.0 as u32 {
-                    Some("MBR".to_string())
+                    Some(("MBR".to_string(), layout_header.partition_count))
                 } else if layout_header.partition_style == PARTITION_STYLE_RAW_VALUE {
-                    Some("RAW".to_string())
+                    Some(("RAW".to_string(), layout_header.partition_count))
                 } else {
                     // 未知的分区样式值
-                    Some(format!("UNKNOWN({})", layout_header.partition_style))
+                    Some((
+                        format!("UNKNOWN({})", layout_header.partition_style),
+                        layout_header.partition_count,
+                    ))
                 }
             } else {
                 None
             }
         };
 
-        if let Some(style) = partition_style {
-            styles.insert(disk_index, style);
+        if let Some(layout) = partition_layout {
+            styles.insert(disk_index, layout);
         }
     }
 
@@ -2609,6 +2614,29 @@ fn query_disk_info(path: &str) -> Option<DiskInfo> {
         .is_ok()
         {
             disk.size = length_info.length as u64;
+        }
+        if disk.size == 0 {
+            let mut geometry_buffer = vec![0u8; 256];
+            let mut geometry_bytes = 0u32;
+            if DeviceIoControl(
+                handle,
+                IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+                None,
+                0,
+                Some(geometry_buffer.as_mut_ptr().cast()),
+                geometry_buffer.len() as u32,
+                Some(&mut geometry_bytes),
+                None,
+            )
+            .is_ok()
+                && geometry_bytes >= size_of::<DISK_GEOMETRY_EX>() as u32
+            {
+                let geometry =
+                    std::ptr::read_unaligned(geometry_buffer.as_ptr().cast::<DISK_GEOMETRY_EX>());
+                if geometry.DiskSize > 0 {
+                    disk.size = geometry.DiskSize as u64;
+                }
+            }
         }
         let _ = CloseHandle(handle);
         if !disk.model.is_empty() || disk.size > 0 {

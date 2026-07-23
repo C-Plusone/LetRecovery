@@ -84,6 +84,7 @@ use super::tools::batch_format::{
 use super::tools::bitlocker_manage::{BitLockerManageDialogIntent, NativeBitLockerManageDialog};
 use super::tools::boot_repair::{BootRepairDialogIntent, NativeBootRepairDialog};
 use super::tools::expand_c::{ExpandCDialogIntent, ExpandCRequest, NativeExpandCDialog};
+use super::tools::hardware_inspector::{HardwareInspectorIntent, NativeHardwareInspectorDialog};
 use super::tools::network_reset::{NativeNetworkResetDialog, NetworkResetDialogIntent};
 use super::tools::nvidia_removal::{
     NativeNvidiaRemovalDialog, NvidiaRemovalDialogIntent, NvidiaRemovalTargetOption,
@@ -499,6 +500,10 @@ enum ToolWorkerMessage {
         recovery_key: bool,
         result: Result<String, String>,
     },
+    HardwareInspectorCompleted {
+        generation: u64,
+        result: Box<Result<crate::core::hardware_inspector::HardwareInspectorSnapshot, String>>,
+    },
 }
 
 #[derive(Clone)]
@@ -714,14 +719,15 @@ mod layout_tests {
         command_bar_layout, command_bar_visibility, command_button_role,
         confirmed_tool_backend_request, device_change_requests_partition_refresh,
         download_failure_message, effective_easy_mode_enabled, initial_mutating_tool_state,
-        install_partition_heading_y, list_view_selection_state_changed, minimum_window_size,
-        page_switch_requires_full_layout, pca_pending_status, pca_target_error_blocks,
-        pca_target_probe_required, pca_target_result_is_current, pca_target_uses_uefi,
-        preferred_window_size, preserved_pe_selection, primary_state_refresh_for_page,
-        tool_backend_result_succeeded, unattended_checked_for_source_preference,
-        BitLockerGateCompletion, InstallControlSnapshot, Page, PcaPendingStatus, PcaTargetContext,
-        PcaTargetKey, PcaTargetMessage, PrimaryStateRefresh, DBT_CONFIGCHANGED, DBT_DEVICEARRIVAL,
-        DBT_DEVICEREMOVECOMPLETE, DBT_DEVNODES_CHANGED, LVIF_STATE, LVIF_TEXT, LVIS_SELECTED,
+        install_partition_heading_y, list_view_selection_state_changed, may_publish_install_chrome,
+        minimum_window_size, page_switch_requires_full_layout, pca_pending_status,
+        pca_target_error_blocks, pca_target_probe_required, pca_target_result_is_current,
+        pca_target_uses_uefi, preferred_window_size, preserved_pe_selection,
+        primary_state_refresh_for_page, tool_backend_result_succeeded,
+        unattended_checked_for_source_preference, BitLockerGateCompletion, InstallControlSnapshot,
+        Page, PcaPendingStatus, PcaTargetContext, PcaTargetKey, PcaTargetMessage,
+        PrimaryStateRefresh, DBT_CONFIGCHANGED, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
+        DBT_DEVNODES_CHANGED, LVIF_STATE, LVIF_TEXT, LVIS_SELECTED,
     };
     use crate::core::disk::PartitionStyle;
     use crate::core::native_download_controller::CatalogueState;
@@ -927,6 +933,15 @@ mod layout_tests {
                 PrimaryStateRefresh::None
             );
         }
+    }
+
+    #[test]
+    fn install_async_results_never_overwrite_other_page_chrome() {
+        assert!(may_publish_install_chrome(Page::Install, false, false));
+        assert!(!may_publish_install_chrome(Page::About, false, false));
+        assert!(!may_publish_install_chrome(Page::Hardware, false, false));
+        assert!(!may_publish_install_chrome(Page::Install, true, false));
+        assert!(!may_publish_install_chrome(Page::Install, false, true));
     }
 
     #[test]
@@ -1426,6 +1441,10 @@ const fn primary_state_refresh_for_page(page: Page) -> PrimaryStateRefresh {
     }
 }
 
+fn may_publish_install_chrome(page: Page, advanced_visible: bool, progress_visible: bool) -> bool {
+    page == Page::Install && !advanced_visible && !progress_visible
+}
+
 #[derive(Clone, Copy)]
 struct Handles {
     brand: HWND,
@@ -1559,6 +1578,8 @@ struct NativeWindow {
         >,
     >,
     expand_c_execution: Option<Receiver<ExpandCWorkerMessage>>,
+    hardware_inspector_dialog: Option<NativeHardwareInspectorDialog>,
+    hardware_inspector_generation: u64,
     tool_worker_sender: std::sync::mpsc::Sender<ToolWorkerMessage>,
     tool_worker_messages: Receiver<ToolWorkerMessage>,
     advanced_visible: bool,
@@ -1730,6 +1751,8 @@ impl NativeWindow {
             expand_c_dialog: None,
             expand_c_analysis: None,
             expand_c_execution: None,
+            hardware_inspector_dialog: None,
+            hardware_inspector_generation: 0,
             tool_worker_sender,
             tool_worker_messages,
             advanced_visible: false,
@@ -2422,6 +2445,9 @@ impl NativeWindow {
     }
 
     unsafe fn update_pca_detection_status(&self) {
+        if !may_publish_install_chrome(self.page, self.advanced_visible, self.progress_visible) {
+            return;
+        }
         let selection_is_relevant = self.pca_selection_is_relevant();
         if !selection_is_relevant {
             return;
@@ -4104,6 +4130,9 @@ impl NativeWindow {
             self.pca_target_detection_pending,
         )
         .is_some();
+        if !may_publish_install_chrome(self.page, self.advanced_visible, self.progress_visible) {
+            return;
+        }
         let Some(h) = &self.handles else { return };
         let was_enabled = IsWindowEnabled(h.primary).as_bool();
         if was_enabled != enabled {
@@ -5164,6 +5193,10 @@ impl NativeWindow {
                 .expand_c_dialog
                 .as_ref()
                 .is_some_and(|dialog| dialog.shell.activate_if_visible())
+            || self
+                .hardware_inspector_dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.activate_if_visible())
     }
 
     unsafe fn handle_tool_intent(&mut self, hwnd: HWND, intent: ToolIntent) {
@@ -5196,6 +5229,17 @@ impl NativeWindow {
             plan.route,
             plan.safety
         );
+        if intent == ToolIntent::HardwareInspector {
+            match NativeHardwareInspectorDialog::create(hwnd) {
+                Ok(mut dialog) => {
+                    dialog.show_modeless();
+                    self.hardware_inspector_dialog = Some(dialog);
+                    self.start_hardware_inspector(hwnd);
+                }
+                Err(error) => log::error!("创建详细硬件检测对话框失败: {error}"),
+            }
+            return;
+        }
         if intent == ToolIntent::ExpandC {
             match NativeExpandCDialog::create(hwnd) {
                 Ok(mut dialog) => {
@@ -5466,6 +5510,22 @@ impl NativeWindow {
             let _ = sender.send(crate::core::native_expand_c_controller::analyze_expand_c());
         });
         self.expand_c_analysis = Some(receiver);
+        let _ = SetTimer(hwnd, TOOL_DIALOG_TIMER_ID, 100, None);
+    }
+
+    unsafe fn start_hardware_inspector(&mut self, hwnd: HWND) {
+        self.hardware_inspector_generation = self.hardware_inspector_generation.wrapping_add(1);
+        let generation = self.hardware_inspector_generation;
+        if let Some(dialog) = &mut self.hardware_inspector_dialog {
+            dialog.set_loading();
+        }
+        let sender = self.tool_worker_sender.clone();
+        std::thread::spawn(move || {
+            let result =
+                Box::new(crate::core::hardware_inspector::HardwareInspectorSnapshot::collect());
+            let _ =
+                sender.send(ToolWorkerMessage::HardwareInspectorCompleted { generation, result });
+        });
         let _ = SetTimer(hwnd, TOOL_DIALOG_TIMER_ID, 100, None);
     }
 
@@ -6599,6 +6659,14 @@ impl NativeWindow {
                     }
                     if !recovery_key {
                         self.start_bitlocker_manage_inventory();
+                    }
+                }
+                ToolWorkerMessage::HardwareInspectorCompleted { generation, result } => {
+                    if generation == self.hardware_inspector_generation {
+                        if let Some(dialog) = &mut self.hardware_inspector_dialog {
+                            dialog.apply_snapshot(*result);
+                            dialog.show_modeless();
+                        }
                     }
                 }
             }
@@ -7799,6 +7867,23 @@ impl NativeWindow {
             }
             None => {}
         }
+        if let Some(dialog) = &mut self.hardware_inspector_dialog {
+            dialog.refresh_layout();
+        }
+        let hardware_inspector_intent = self
+            .hardware_inspector_dialog
+            .as_mut()
+            .and_then(|dialog| dialog.take_intent());
+        match hardware_inspector_intent {
+            Some(HardwareInspectorIntent::Refresh) => self.start_hardware_inspector(hwnd),
+            Some(HardwareInspectorIntent::Close) => {
+                self.hardware_inspector_generation =
+                    self.hardware_inspector_generation.wrapping_add(1);
+                self.hardware_inspector_dialog = None;
+            }
+            None => {}
+        }
+
         let mut remove = Vec::new();
         let mut read_only_jobs = Vec::new();
         for (index, dialog) in self.tool_dialogs.iter_mut().enumerate() {
@@ -8108,6 +8193,7 @@ impl NativeWindow {
             || self.expand_c_dialog.is_some()
             || self.expand_c_analysis.is_some()
             || self.expand_c_execution.is_some()
+            || self.hardware_inspector_dialog.is_some()
             || self.tool_background_jobs != 0
     }
 
@@ -9601,6 +9687,9 @@ impl NativeWindow {
         if let Some(page) = &self.about_page {
             page.relocalize(easy_mode_available);
         }
+        if let Some(dialog) = &mut self.hardware_inspector_dialog {
+            dialog.relocalize();
+        }
         self.update_system_status();
         self.select_page(hwnd, self.page);
         self.layout(hwnd);
@@ -10187,6 +10276,11 @@ unsafe extern "system" fn window_proc(
                 let Some(handles) = state.handles else {
                     return LRESULT(0);
                 };
+                let publish_install_chrome = may_publish_install_chrome(
+                    state.page,
+                    state.advanced_visible,
+                    state.progress_visible,
+                );
                 match message.result {
                     Ok(source) => {
                         use crate::core::native_image_source::InspectedImageSource;
@@ -10232,10 +10326,12 @@ unsafe extern "system" fn window_proc(
                             );
                         }
                         if state.xp_i386_source.is_some() {
-                            set_text(
-                                handles.status,
-                                &crate::tr!("已识别 XP/2003 文本模式安装源。"),
-                            );
+                            if publish_install_chrome {
+                                set_text(
+                                    handles.status,
+                                    &crate::tr!("已识别 XP/2003 文本模式安装源。"),
+                                );
+                            }
                         } else if state.image_volumes.is_empty()
                             && state.effective_image_path.as_deref().is_some_and(|path| {
                                 !matches!(
@@ -10246,18 +10342,27 @@ unsafe extern "system" fn window_proc(
                                 )
                             })
                         {
-                            set_text(handles.status, &crate::tr!("系统镜像中没有可用的安装卷。"));
+                            if publish_install_chrome {
+                                set_text(
+                                    handles.status,
+                                    &crate::tr!("系统镜像中没有可用的安装卷。"),
+                                );
+                            }
                         } else if state.image_volumes.is_empty() {
-                            set_text(handles.status, &crate::tr!("Ghost 镜像已就绪。"));
+                            if publish_install_chrome {
+                                set_text(handles.status, &crate::tr!("Ghost 镜像已就绪。"));
+                            }
                         } else {
                             let _ =
                                 SendMessageW(handles.image_volume, 0x014E, WPARAM(0), LPARAM(0));
                             state.update_storage_driver_default();
                             state.update_advanced_install_context();
-                            set_text(
-                                handles.status,
-                                &crate::tr!("系统镜像读取完成，请选择目标分区。"),
-                            );
+                            if publish_install_chrome {
+                                set_text(
+                                    handles.status,
+                                    &crate::tr!("系统镜像读取完成，请选择目标分区。"),
+                                );
+                            }
                         }
                         let has_image_volume_row = !state.image_volumes.is_empty();
                         state.set_install_volume_row_visible(hwnd, has_image_volume_row);
@@ -10274,8 +10379,10 @@ unsafe extern "system" fn window_proc(
                         state.source_has_unattend = false;
                         state.apply_unattend_default();
                         state.set_install_volume_row_visible(hwnd, false);
-                        set_text(handles.status, &crate::tr!("读取系统镜像失败：{}", error));
-                        let _ = EnableWindow(handles.primary, false);
+                        if publish_install_chrome {
+                            set_text(handles.status, &crate::tr!("读取系统镜像失败：{}", error));
+                            let _ = EnableWindow(handles.primary, false);
+                        }
                     }
                 }
             }
@@ -10290,6 +10397,14 @@ unsafe extern "system" fn window_proc(
                     return LRESULT(0);
                 }
                 if state.handle_tool_content_action(command_id, source) {
+                    return LRESULT(0);
+                }
+                if NativeHardwareInspectorDialog::owns_command(command_id) {
+                    if notification == BN_CLICKED as u16 {
+                        if let Some(dialog) = &mut state.hardware_inspector_dialog {
+                            dialog.handle_command(command_id);
+                        }
+                    }
                     return LRESULT(0);
                 }
                 if NativeQuickPartitionDialog::owns_command(command_id) {
@@ -10649,7 +10764,9 @@ unsafe extern "system" fn window_proc(
                                 }
                             }
                         }
-                        Some(InfoIntent::SelectLanguage) => {
+                        Some(InfoIntent::SelectLanguage)
+                            if notification == CBN_SELCHANGE as u16 =>
+                        {
                             let language = state
                                 .about_page
                                 .as_ref()
